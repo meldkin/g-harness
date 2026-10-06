@@ -4,10 +4,18 @@ repos:
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
-        exclude: ^(\.kilo/|\.opencode/)
+        # Reference checkouts of upstream projects get unpacked inside the repo
+        # during review. They are never ours to format, and .gitignore does not
+        # cover pre-commit hooks (ruff honours .gitignore; these hooks do not).
+        # One anchor reused below, so adding a checkout is a single edit -- the
+        # hardcoded `cocoindex-code-main/` had gone stale while five other names
+        # sat unprotected.
+        exclude: &vendored_exclude ^(\.kilo/|\.opencode/|(?:agentic-awesome-skills-main|deepseek-harness-master|open-code-review-main|antigravity-sdk-python-main|learn-harness-engineering-main)/)
       - id: check-yaml
         args: [--allow-multiple-documents]
+        exclude: *vendored_exclude
       - id: check-json
+        exclude: *vendored_exclude
       - id: check-added-large-files
         args: [--maxkb=500]
       - id: check-merge-conflict
@@ -17,9 +25,9 @@ repos:
     hooks:
       - id: ruff
         args: [--fix]
-        exclude: ^cocoindex-code-main/
+        exclude: *vendored_exclude
       - id: ruff-format
-        exclude: ^cocoindex-code-main/
+        exclude: *vendored_exclude
 
   - repo: local
     hooks:
@@ -39,7 +47,9 @@ repos:
 
       - id: security-scan
         name: Security scan
-        entry: python .github/scripts/security_scan.py .
+        # --strict so the injection-pattern half actually runs; it is skipped for
+        # documentation (see the scanner's docstring), which is what kept it unused.
+        entry: python .github/scripts/security_scan.py . --strict
         language: system
         pass_filenames: false
 
