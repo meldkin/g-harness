@@ -29,23 +29,30 @@ import sys
 from pathlib import Path
 
 # ─── Destructive Command Patterns (port of BLOCK_PATTERNS) ──────────────────
-# Any-order recursive/force flags: `-rf`, `-fr`, `-r -f`, `--recursive --force`.
-# The old literal `-rf?` accepted only `-r`/`-rf`, so `rm -fr /` and
-# `rm -r -f /` walked straight past the root-wipe guard; `rm_no_preserve`
-# required the flag immediately after `rm `, so `rm -rf --no-preserve-root /`
-# passed too. Verified against these patterns on 2026-10-07.
-_RM_FLAGS = r"(?:-{1,2}[a-zA-Z][a-zA-Z-]*\s+)*"
+# `rm` must sit in COMMAND position -- start of line, after a shell separator, or
+# as an xargs target. A bare `rm\s+` also matched `docker run --rm -v /var/...`
+# and `rg "rm /" .`, and blocked both. An over-block is worse than a miss here:
+# a guard that blocks routine work gets switched off.
+_RM_CMD = r"(?:^|[;&|\n]\s*|\bxargs\s+)rm\s+(?:--\s+)?"
+# Only the flags that make an rm destructive, in any order: -rf, -fr, -r -f,
+# --recursive --force. A bare `[a-zA-Z]` class also swallowed `-v` and `-i`, so
+# `rm -v /var/log/app.log` looked like a recursive wipe.
+_RM_FLAGS = r"(?:-[rRfF]+\s+|--(?:recursive|force)\s+|--\s+)*"
+# A path that resolves to the filesystem root: `/`, `//`, `/./`, `/.`, `/../`.
+# Matching a bare `/` let `rm -rf //` and `rm -rf /./` straight through.
+_ROOT_PATH = r"/(?:/|\.+/?)*"
 
 BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("rm_root", re.compile(rf"rm\s+{_RM_FLAGS}/(?:\s|$|\*|\"|')")),
-    ("rm_home", re.compile(rf"rm\s+{_RM_FLAGS}~")),
-    ("rm_wildcard", re.compile(rf"rm\s+{_RM_FLAGS}\*")),
-    ("rm_no_preserve", re.compile(r"rm\s+.*--no-preserve-root")),
+    ("rm_root", re.compile(rf"{_RM_CMD}{_RM_FLAGS}{_ROOT_PATH}(?:\s|$|\*|\"|')")),
+    ("rm_home", re.compile(rf"{_RM_CMD}{_RM_FLAGS}~")),
+    ("rm_wildcard", re.compile(rf"{_RM_CMD}{_RM_FLAGS}\*")),
+    ("rm_no_preserve", re.compile(rf"{_RM_CMD}.*(?:--no-preserve-root|--preserve-root[=\s]+no)")),
     ("force_push_main", re.compile(r"git\s+push\s+.*(--force|-f)\s+.*(main|master)")),
-    # The flag may follow the branch (`git push origin main --force`) or be
-    # absent entirely (`git push --force`, `git push -f`). `--force-with-lease`
-    # stays allowed: it is the safe alternative this harness recommends.
-    ("force_push_any", re.compile(r"git\s+push\b.*(?:--force\b(?!-)|(?:^|\s)-f\b)")),
+    # The flag may follow the branch, or be absent entirely. The segment stops at
+    # a shell separator, because `git push origin main && npm install --force`
+    # was being read as a force-push. `--force-with-lease` stays allowed: it is
+    # the safe alternative this harness recommends.
+    ("force_push_any", re.compile(r"git\s+push\b[^&|;\n]*(?:--force\b(?!-)|(?:^|\s)-f\b)")),
     ("git_reset_hard", re.compile(r"git\b.*\breset\b.*--hard")),
     ("drop_table", re.compile(r"DROP\s+(?:TABLE|DATABASE)", re.I)),
     ("truncate_table", re.compile(r"TRUNCATE\s+TABLE", re.I)),
@@ -66,11 +73,14 @@ BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("rm_r_wildcard", re.compile(r"rm\s+-r\s+\*")),
     ("rm_r_f_wildcard", re.compile(r"rm\s+-r\s+-f\s+\*")),
     ("git_clean_force", re.compile(r"git\s+clean\s+-f")),
-    ("rm_system_dir", re.compile(rf"rm\s+{_RM_FLAGS}/(?:etc|usr|var|bin|lib(?:64)?|boot|sbin|opt|root|sys|proc|dev)(?:/|\s|$)")),
+    ("rm_system_dir", re.compile(rf"{_RM_CMD}{_RM_FLAGS}{_ROOT_PATH}(?:etc|usr|var|bin|lib(?:64)?|boot|sbin|opt|root|sys|proc|dev)(?:/|\s|$)")),
     ("curl_pipe_shell", re.compile(r"(?:curl|wget)\s+.*\|\s*(?:ba)?sh\b")),
     ("dd_device_write", re.compile(r"dd\s+.*of=/dev/")),
     ("chmod_chown_system", re.compile(r"(?:chmod|chown)\s+-R\s+(?:[^/\s]+\s+)*/(?:etc|usr|var|bin|lib(?:64)?|boot|sbin|opt|root|sys|proc|dev)(?:/|\s|$)")),
-    ("rm_temp_linux", re.compile(r"rm\s+-rf?\s+/tmp/")),
+    # noqa: S108 -- this is a regex fragment matching the literal path, not a
+    # temp path the code uses; splitting the f-string made bandit see `/tmp/` as
+    # its own constant and fire hardcoded_tmp_directory.
+    ("rm_temp_linux", re.compile(rf"{_RM_CMD}{_RM_FLAGS}/tmp/")),  # noqa: S108
     ("rm_temp_win", re.compile(r"rm\s+-rf?\s+\$?(?:env:)?TEMP\b", re.I)),
     ("del_temp_win", re.compile(r"del\s+(?:/f\s+)?/[qs]\s+\$?(?:env:)?TEMP\b", re.I)),
     ("win_rd_recursive", re.compile(r"(?:rd|rmdir)\s+(?:.*\s)?/s\b", re.I)),

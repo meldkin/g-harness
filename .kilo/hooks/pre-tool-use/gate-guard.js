@@ -20,31 +20,55 @@
 const MAX_STDIN = 1024 * 1024;
 
 // ─── BLOCK PATTERNS (exit 2) ───────────────────────────────────────────────
-// Any-order recursive/force flags: `-rf`, `-fr`, `-r -f`, `--recursive --force`.
-// The old literal `-rf?` accepted only `-r`/`-rf`, so `rm -fr /` walked past the
-// root-wipe guard, and `rm_no_preserve` required the flag immediately after
-// `rm `, so `rm -rf --no-preserve-root /` passed too. Keep in sync with
-// .claude/hooks/guard.py (`_RM_FLAGS`).
-const RM_FLAGS = '(?:-{1,2}[a-zA-Z][a-zA-Z-]*\\s+)*';
+// Kept 1:1 with .claude/hooks/guard.py. Kilo previously enforced a strictly
+// weaker set than Claude: rm_system_dir, rm_temp_linux, chmod_chown_system and
+// thirteen others were missing here, so `rm -rf /etc` blocked under Claude and
+// passed under Kilo.
+//
+// `rm` must sit in COMMAND position -- start of line, after a shell separator, or
+// as an xargs target. A bare `rm\s+` also matched `docker run --rm -v /var/...`
+// and `rg "rm /" .`, and blocked both. An over-block is worse than a miss here:
+// a guard that blocks routine work gets switched off.
+const RM_CMD = '(?:^|[;&|\\n]\\s*|\\bxargs\\s+)rm\\s+(?:--\\s+)?';
+// Only the flags that make an rm destructive, in any order: -rf, -fr, -r -f,
+// --recursive --force. A bare [a-zA-Z] class also swallowed -v and -i, so
+// `rm -v /var/log/app.log` looked like a recursive wipe.
+const RM_FLAGS = '(?:-[rRfF]+\\s+|--(?:recursive|force)\\s+|--\\s+)*';
+// A path that resolves to the filesystem root: `/`, `//`, `/./`, `/.`, `/../`.
+const ROOT_PATH = '/(?:/|\\.+/?)*';
 const BLOCK_PATTERNS = [
-  { name: 'rm_root', pattern: new RegExp('rm\\s+' + RM_FLAGS + '/(?:\\s|$|\\*|"|\')') },
-  { name: 'rm_home', pattern: new RegExp('rm\\s+' + RM_FLAGS + '~') },
-  { name: 'rm_wildcard', pattern: new RegExp('rm\\s+' + RM_FLAGS + '\\*') },
-  { name: 'rm_no_preserve', pattern: /rm\s+.*--no-preserve-root/ },
+  { name: 'rm_root', pattern: new RegExp(RM_CMD + RM_FLAGS + ROOT_PATH + '(?:\\s|$|\\*|"|\')') },
+  { name: 'rm_home', pattern: new RegExp(RM_CMD + RM_FLAGS + '~') },
+  { name: 'rm_wildcard', pattern: new RegExp(RM_CMD + RM_FLAGS + '\\*') },
+  { name: 'rm_relative_wildcard', pattern: new RegExp(RM_CMD + RM_FLAGS + '\\./') },
+  { name: 'rm_no_preserve', pattern: new RegExp(RM_CMD + '.*(?:--no-preserve-root|--preserve-root[=\\s]+no)') },
+  { name: 'rm_system_dir', pattern: new RegExp(RM_CMD + RM_FLAGS + ROOT_PATH + '(?:etc|usr|var|bin|lib(?:64)?|boot|sbin|opt|root|sys|proc|dev)(?:/|\\s|$)') },
+  { name: 'rm_temp_linux', pattern: new RegExp(RM_CMD + RM_FLAGS + '/tmp/') },
+  { name: 'rm_temp_win', pattern: new RegExp(RM_CMD + RM_FLAGS + '\\$?(?:env:)?TEMP\\b', 'i') },
+  { name: 'del_temp_win', pattern: /del\s+(?:\/f\s+)?\/[qs]\s+\$?(?:env:)?TEMP\b/i },
   { name: 'force_push_main', pattern: /git\s+push\s+.*(--force|-f)\s+.*(main|master)/ },
-  // The flag may follow the branch (`git push origin main --force`) or be absent
-  // entirely (`git push --force`, `git push -f`). `--force-with-lease` stays
-  // allowed: it is the safe alternative this harness recommends.
-  { name: 'force_push_any', pattern: /git\s+push\b.*(?:--force\b(?!-)|(?:^|\s)-f\b)/ },
+  // The segment stops at a shell separator, because
+  // `git push origin main && npm install --force` was being read as a force-push.
+  // `--force-with-lease` stays allowed: it is the safe alternative we recommend.
+  { name: 'force_push_any', pattern: /git\s+push\b[^&|;\n]*(?:--force\b(?!-)|(?:^|\s)-f\b)/ },
   { name: 'git_reset_hard', pattern: /git\b.*\breset\b.*--hard/ },
+  { name: 'git_clean_force', pattern: /git\s+clean\s+-f/ },
   { name: 'drop_table', pattern: /DROP\s+(?:TABLE|DATABASE)/i },
   { name: 'truncate_table', pattern: /TRUNCATE\s+TABLE/i },
   { name: 'dd_raw', pattern: /dd\s+if=/ },
+  { name: 'dd_device_write', pattern: /dd\s+.*of=\/dev\// },
   { name: 'mkfs', pattern: /mkfs\./ },
   { name: 'shred', pattern: /shred\s+/ },
   { name: 'dev_write', pattern: />\s*\/dev\/sd[a-z]/ },
+  { name: 'curl_pipe_shell', pattern: /(?:curl|wget)\s+.*\|\s*(?:ba)?sh\b/ },
+  { name: 'chmod_chown_system', pattern: /(?:chmod|chown)\s+-R\s+(?:[^\/\s]+\s+)*\/(?:etc|usr|var|bin|lib(?:64)?|boot|sbin|opt|root|sys|proc|dev)(?:\/|\s|$)/ },
   { name: 'win_del_force', pattern: /del\s+\/f\s+\/s/ },
+  { name: 'win_rd_recursive', pattern: /(?:rd|rmdir)\s+(?:.*\s)?\/s\b/i },
+  { name: 'win_del_any', pattern: /del\s+(?:.*\s)?\/[qsf]\b/i },
   { name: 'win_remove_recursive', pattern: /Remove-Item\s+.*-Recurse.*-Force/i },
+  { name: 'win_format_volume', pattern: /\bFormat-Volume\b/ },
+  { name: 'win_stop_computer', pattern: /\bStop-Computer\b/ },
+  { name: 'win_restart_computer', pattern: /\bRestart-Computer\b/ },
   // Anchored to a real format invocation: `format` in command position with a
   // drive letter or /fs: switch. A bare /\bformat\s/ also matched
   // `--output-format json`, so the guard blocked ruff and grep -- and a guard

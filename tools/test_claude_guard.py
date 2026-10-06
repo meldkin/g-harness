@@ -82,6 +82,13 @@ BLOCKED_COMMANDS = [
     "git push -f",
     "git -c x=y reset --hard",
     "remove-item -recurse -force C:\\data",
+    # Path spellings that resolve to root, and the end-of-options marker. A bare
+    # `/` in the pattern let the first three through.
+    "rm -rf //",
+    "rm -rf /./",
+    "rm -rf -- /",
+    "rm -rf --preserve-root=no /",
+    "cd /tmp && rm -rf /",
 ]
 
 
@@ -106,6 +113,18 @@ SAFE_COMMANDS = [
     "git push origin feature/login-fix",
     "rm -rf build/",
     "rm -fr node_modules",
+    # Regression guard for the anchoring fix. Every one of these was BLOCKED by
+    # the previous pattern set: `rm\s+` matched inside `--rm`, inside a quoted
+    # `rg` pattern and after `echo`, and `force_push_any`'s `.*` crossed a shell
+    # separator to reach an unrelated `-f` / `--force`. All seven are routine.
+    "docker run --rm -v /var/run/docker.sock:/var/run/docker.sock myimage",
+    "docker run --rm ~/app",
+    'rg "rm /" .kilo/',
+    "echo rm *",
+    "git push origin main && npm install --force",
+    "git push origin main; tail -f app.log",
+    "git push --force-with-lease origin main && tail -f log",
+    "rm -v /var/log/app.log",
 ]
 
 
