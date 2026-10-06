@@ -1,0 +1,80 @@
+name: CI — Quality Gates
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality-gates:
+    name: Quality Gates (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+        shell: bash
+
+      - name: Security Scan
+        run: python .github/scripts/security_scan.py .
+        shell: bash
+
+      - name: Ruff Lint
+        run: ruff check .
+        shell: bash
+
+      - name: Lint Budget (S/BLE families absent from .ruff.toml)
+        run: python tools/check_lint_budget.py
+        shell: bash
+
+      - name: Schema Validation
+        run: python tools/validate_schemas.py
+        shell: bash
+
+      - name: Garden (Drift Detection)
+        run: python tools/garden.py
+        shell: bash
+
+      - name: Bootstrap Smoke Test (init.sh)
+        run: bash init.sh --quiet
+        shell: bash
+
+      - name: Harness Tests (auto-discovers all tools/test_*.py)
+        run: python -m pytest tools/ -v --tb=short
+        shell: bash
+
+  ci-ok:
+    name: CI — All Gates Passed
+    needs: [quality-gates]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate Results
+        run: |
+          python -c "
+          import json, sys
+          needs = json.loads('''${{ toJSON(needs) }}''')
+          failed = [k for k,v in needs.items() if v.get('result') != 'success']
+          if failed:
+              print(f'FAILED: {failed}')
+              sys.exit(1)
+          print('All gates passed')
+          "

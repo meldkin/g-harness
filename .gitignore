@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.pytest_temp*/
+.ruff_cache/
+.coverage
+coverage.json
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+tools/_version.py
+
+# Node
+node_modules/
+
+# NOTE: .opencode/opencode.json is TRACKED — it carries the OpenCode v2
+# `providers` block; the root opencode.json stays v1-safe for Kilo Code.
+
+# Environment secrets
+.env
+.env.*
+!.env.template
+
+# Harness per-project config
+.solocode/
+# But allow executor config templates to be committed
+!.solocode/executor-config.json
+!.solocode/executor-mode
+!.solocode/.gitkeep
+
+# Claude Code personal overrides (generated locally, not committed)
+.claude/settings.local.json
+
+# Reference repos — upstream projects unpacked alongside the harness for
+# study. Never committed. Ignoring them also keeps ruff out (it honours
+# .gitignore), which is why they belong here rather than in .ruff.toml.
+/agentic-awesome-skills-main/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/mcp.json
+.idea/
+
+# Reference checkouts of upstream projects — read for review, never part of the
+# harness. They have no .git of their own, so without these entries a plain
+# `git add -A` would swallow them into harness history.
+deepseek-harness-master/
+open-code-review-main/
+antigravity-sdk-python-main/
+# learn-harness-engineering-main/ is a reference checkout. Extra reason it
+# belongs here: ruff honours .gitignore, so without this entry `ruff check .`
+# lints the vendored course's Python files and fails the checklist gate.
+learn-harness-engineering-main/
+
+# Antigravity IDE custom root junction (mirrors .gemini/antigravity/skills locally)
+/.agents/skills/

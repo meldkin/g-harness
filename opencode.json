@@ -1,0 +1,46 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "commandcode/deepseek-v4-pro",
+  "small_model": "commandcode/deepseek-v4.1-flash",
+  "default_agent": "solo-code-engineer",
+  "agents": {
+    "solo-code-engineer": {
+      "model": "commandcode/deepseek-v4-pro"
+    }
+  },
+  "permission": {
+    "edit": "ask",
+    "external_directory": "ask",
+    "bash": {
+      "*": "ask",
+      "python .github/scripts/security_scan.py *": "allow",
+      "python .github/scripts/checklist.py *": "allow",
+      "python tools/antigravity_delegate.py *": "ask",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "git add*": "allow",
+      "git commit*": "allow",
+      "git push*": "ask",
+      "git reset --hard*": "deny",
+      "git push --force*": "deny",
+      "rm -rf *": "deny",
+      "del /s /q *": "deny",
+      "DROP TABLE*": "deny",
+      "DROP DATABASE*": "deny"
+    },
+    "skill": {
+      "*": "allow",
+      "ci-cd-and-automation": "ask",
+      "permission-guard": "ask",
+      "plan": "ask",
+      "planning-and-task-breakdown": "ask",
+      "requesting-code-review": "ask",
+      "shipping-and-launch": "ask",
+      "spec-driven-development": "ask",
+      "subagent-driven-development": "ask",
+      "task-delegation": "ask",
+      "wayfinder": "ask"
+    }
+  }
+}

@@ -1,0 +1,450 @@
+#!/usr/bin/env python3
+"""Run Google Antigravity's headless worker behind harness guardrails.
+
+The caller remains responsible for reviewing the diff and running verification.
+Writes require both ``--auto-approve`` and an explicit ``--allow-dir`` scope.
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.shared_state import SharedState  # noqa: E402
+
+DEFAULT_MODEL = "gemini-3.8-flash-medium"
+DEFAULT_TIMEOUT_SECONDS = 120
+DIRECTORY_LOCK_ENGINE = "gemini"
+
+GUARDRAIL = """STRICT OPERATING CONSTRAINTS (must follow, no exceptions):
+1. Work only inside the allowed directory named below. Do not read, create,
+   modify, delete, or rename files outside it.
+2. Do not install dependencies, change permissions, run destructive commands,
+   commit, push, or alter harness configuration.
+3. If the task needs a path outside the allowed directory, stop and report the
+   missing scope instead of working around this restriction.
+4. End the response with: Scope check: touched only <file list>.
+
+"""
+
+
+def _stderr(message: str) -> None:
+    print(f"[antigravity_delegate] {message}", file=sys.stderr)
+
+
+def _make_streams_encoding_safe() -> None:
+    """Never crash on worker output the console encoding cannot represent.
+
+    agy frequently returns non-Latin characters (arrows, em-dashes, box drawing);
+    printing those to a cp1252 console on Windows raises UnicodeEncodeError and
+    would discard the whole result. Keep the console's encoding, only relax errors.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        with contextlib.suppress(ValueError, OSError):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
+# Best-effort markers for an exhausted account quota. The exact wording is not
+# documented, so this is a heuristic: it decides whether to tell the user to
+# rotate the account rather than report a generic failure.
+QUOTA_MARKERS = (
+    "quota",
+    "rate limit",
+    "rate-limit",
+    "resource exhausted",
+    "resource_exhausted",
+    "resourceexhausted",
+    "too many requests",
+    "429",
+)
+
+
+def _looks_like_quota_error(text: str) -> bool:
+    """Best-effort: does this error text look like an exhausted Gemini quota?"""
+    lowered = text.lower()
+    return any(marker in lowered for marker in QUOTA_MARKERS)
+
+
+def find_agy_binary() -> str | None:
+    """Find agy.exe through PATH, then its standard Windows install location."""
+    on_path = shutil.which("agy")
+    if on_path:
+        return on_path
+
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        candidate = Path(local_app_data) / "agy" / "bin" / "agy.exe"
+        if candidate.is_file():
+            return str(candidate)
+
+    candidate = Path.home() / "AppData" / "Local" / "agy" / "bin" / "agy.exe"
+    return str(candidate) if candidate.is_file() else None
+
+
+def parse_ndjson_events(output: str) -> dict[str, Any]:
+    """Parse Antigravity's ``stream-json`` events without assuming event order."""
+    result: dict[str, Any] = {
+        "text": "",
+        "events": [],
+        "conversation_id": None,
+        "response": None,
+        "status": None,
+        "usage": None,
+        "error": None,
+        "denied_actions": [],
+        "tool_errors": [],
+    }
+    deltas: list[str] = []
+    saw_result = False
+
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        result["events"].append(event)
+        result["conversation_id"] = result["conversation_id"] or event.get("conversation_id")
+
+        if event.get("event") == "step_update":
+            step = event.get("step_update", {})
+            text_delta = step.get("text_delta")
+            if isinstance(text_delta, str):
+                deltas.append(text_delta)
+            if step.get("step_type") == "tool" and step.get("state") == "ERROR":
+                tool_error = step.get("tool_info", {}).get("error", {})
+                result["tool_errors"].append(
+                    {
+                        "tool": step.get("tool_name"),
+                        "message": (tool_error.get("message") or "").splitlines()[0]
+                        if tool_error.get("message")
+                        else None,
+                    }
+                )
+
+        if event.get("event") == "result":
+            saw_result = True
+            final = event.get("result", {})
+            result["response"] = final.get("response")
+            result["status"] = final.get("status")
+            result["usage"] = final.get("usage")
+            result["denied_actions"] = final.get("denied_actions") or []
+            if final.get("status") != "SUCCESS":
+                result["error"] = final.get("error") or f"Antigravity result status: {final.get('status')}"
+
+    result["text"] = "".join(deltas)
+    if not result["text"] and isinstance(result["response"], str):
+        result["text"] = result["response"]
+    if not result["events"]:
+        result["error"] = "Antigravity produced no NDJSON events"
+    elif not saw_result:
+        result["error"] = "Antigravity stream ended without a result event"
+    return result
+
+
+def resolve_allowed_directory(value: str, target_dir: Path) -> tuple[Path, str]:
+    """Resolve an allowed directory and reject paths outside the workspace."""
+    supplied = Path(value)
+    resolved = (target_dir / supplied).resolve() if not supplied.is_absolute() else supplied.resolve()
+    try:
+        relative = resolved.relative_to(target_dir)
+    except ValueError as exc:
+        raise ValueError("--allow-dir must stay inside --target-dir") from exc
+    if not resolved.is_dir():
+        raise ValueError(f"--allow-dir is not a directory: {resolved}")
+    relative_path = relative.as_posix() or "."
+    if relative_path == ".":
+        raise ValueError("--allow-dir . is not permitted; choose a narrower directory")
+    return resolved, relative_path
+
+
+SNAPSHOT_IGNORED_DIRS = frozenset(
+    {
+        ".git",
+        ".solocode",
+        ".venv",
+        "venv",
+        "node_modules",
+        "__pycache__",
+        ".ruff_cache",
+        ".pytest_cache",
+    }
+)
+# Pruned at the workspace root only: a nested ``build``/``dist`` directory can
+# hold authored files, and skipping it anywhere would hide an out-of-scope write
+# from the post-run scope check.
+SNAPSHOT_ROOT_ONLY_IGNORED_DIRS = frozenset({"dist", "build"})
+SNAPSHOT_IGNORED_DIR_PREFIXES = (".pytest_temp",)
+
+
+def is_snapshot_ignored(relative: Path) -> bool:
+    """Return whether a workspace-relative path is generated noise.
+
+    Matches the path *relative to the snapshot root*: a workspace that itself
+    lives under a directory named ``build`` must still be snapshotted.
+    """
+    parts = relative.parts
+    if not parts:
+        return False
+    if parts[0] in SNAPSHOT_ROOT_ONLY_IGNORED_DIRS:
+        return True
+    return any(
+        part in SNAPSHOT_IGNORED_DIRS or part.startswith(SNAPSHOT_IGNORED_DIR_PREFIXES)
+        for part in parts
+    )
+
+
+def snapshot_workspace(root: Path) -> dict[str, str]:
+    """Hash workspace files so post-run scope validation sees untracked changes too."""
+    snapshot: dict[str, str] = {}
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root)
+        if is_snapshot_ignored(relative):
+            continue
+        try:
+            snapshot[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            continue
+    return snapshot
+
+
+def changed_workspace_paths(before: dict[str, str], after: dict[str, str]) -> list[str]:
+    """Return created, modified, and deleted paths between two snapshots."""
+    return sorted(path for path in before.keys() | after.keys() if before.get(path) != after.get(path))
+
+
+def paths_outside_directory(paths: list[str], allowed_dir: str) -> list[str]:
+    """Return changed paths not contained by a relative allowed directory."""
+    if allowed_dir == ".":
+        return []
+    prefix = allowed_dir.rstrip("/") + "/"
+    return [path for path in paths if path != allowed_dir and not path.startswith(prefix)]
+
+
+def build_prompt(
+    task: str, *, allow_dir: str | None, auto_approve: bool, guardrail: bool, allow_tools: bool = False
+) -> str:
+    """Create the worker prompt with the execution policy visible to the model."""
+    policy = ""
+    if guardrail:
+        policy += GUARDRAIL
+    if auto_approve:
+        policy += f"Allowed write directory: {allow_dir}\n\n"
+    elif allow_tools:
+        policy += (
+            "READ-ONLY MODE: do not modify, create, delete, or rename files. You MAY run "
+            "read-only tool calls and shell commands (grep, listing, git status, tests) to "
+            "inspect the project.\n\n"
+        )
+    else:
+        policy += "READ-ONLY MODE: do not modify, create, delete, or rename files.\n\n"
+    return policy + "Task:\n" + task
+
+
+def run_agy_cli(
+    *,
+    prompt: str,
+    model: str,
+    target_dir: Path,
+    agy_binary: str,
+    skip_permissions: bool = False,
+    timeout_s: int = DEFAULT_TIMEOUT_SECONDS,
+    conversation: str | None = None,
+    continue_latest: bool = False,
+) -> tuple[dict[str, Any], int]:
+    """Execute agy and return parsed output plus its process exit code."""
+    command = [
+        agy_binary,
+        "--print",
+        prompt,
+        "--output-format",
+        "stream-json",
+        "--add-dir",
+        str(target_dir),
+        "--model",
+        model,
+    ]
+    if conversation:
+        command += ["--conversation", conversation]
+    elif continue_latest:
+        command.append("--continue")
+    if skip_permissions:
+        command.append("--dangerously-skip-permissions")
+    try:
+        process = subprocess.run(  # noqa: S603 -- binary is discovered or explicitly supplied by the caller
+            command,
+            cwd=target_dir,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_s,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {"text": "", "error": f"Timeout after {timeout_s}s"}, 124
+    except OSError as exc:
+        return {"text": "", "error": str(exc)}, 1
+
+    parsed = parse_ndjson_events(process.stdout)
+    parsed["stderr"] = process.stderr or ""
+    if process.returncode != 0:
+        parsed["error"] = parsed.get("error") or f"agy exited with code {process.returncode}"
+        if process.stderr:
+            _stderr(process.stderr[:500].strip())
+    return parsed, process.returncode
+
+
+def main(argv: list[str] | None = None) -> int:
+    _make_streams_encoding_safe()
+    parser = argparse.ArgumentParser(description="Antigravity headless delegation wrapper")
+    parser.add_argument("prompt", help="Self-contained task for the worker")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Model ID (default: {DEFAULT_MODEL})")
+    parser.add_argument("--target-dir", default=".", help="Workspace directory (default: current directory)")
+    parser.add_argument("--allow-dir", help="Writable directory inside --target-dir; required with --auto-approve")
+    parser.add_argument("--auto-approve", action="store_true", help="Allow writes inside --allow-dir")
+    parser.add_argument(
+        "--allow-tools",
+        action="store_true",
+        help="Auto-approve read/execute tool use without granting a write scope",
+    )
+    parser.add_argument("--no-guardrail", action="store_true", help="Skip the prompt guardrail in read-only mode only")
+    parser.add_argument("--agy-bin", help="Path to agy executable")
+    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS, help="Timeout in seconds")
+    parser.add_argument("--conversation", help="Resume a previous agy conversation by ID")
+    parser.add_argument(
+        "--continue-latest",
+        action="store_true",
+        help="Resume agy's most recent conversation instead of starting fresh",
+    )
+    args = parser.parse_args(argv)
+
+    if args.allow_dir and not args.auto_approve:
+        parser.error("--allow-dir requires --auto-approve")
+    if args.auto_approve and not args.allow_dir:
+        parser.error("--auto-approve requires --allow-dir")
+    if args.allow_tools and args.auto_approve:
+        parser.error("--allow-tools and --auto-approve are mutually exclusive")
+    if args.allow_tools and args.no_guardrail:
+        parser.error("--no-guardrail cannot be combined with --allow-tools")
+    if args.auto_approve and args.no_guardrail:
+        parser.error("--no-guardrail cannot be combined with --auto-approve")
+    if args.conversation and args.continue_latest:
+        parser.error("--conversation and --continue-latest are mutually exclusive")
+    if args.timeout <= 0:
+        parser.error("--timeout must be positive")
+
+    target_dir = Path(args.target_dir).resolve()
+    if not target_dir.is_dir():
+        parser.error(f"--target-dir is not a directory: {target_dir}")
+    try:
+        _, allowed_relative = resolve_allowed_directory(args.allow_dir, target_dir) if args.allow_dir else (None, None)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    agy_binary = args.agy_bin or find_agy_binary()
+    if not agy_binary:
+        _stderr("agy binary not found; provide --agy-bin or install Antigravity CLI")
+        return 1
+
+    prompt = build_prompt(
+        args.prompt,
+        allow_dir=allowed_relative,
+        auto_approve=args.auto_approve,
+        guardrail=not args.no_guardrail,
+        allow_tools=args.allow_tools,
+    )
+    before = snapshot_workspace(target_dir) if args.auto_approve else {}
+    session_id = f"antigravity-{os.getpid()}-{time.monotonic_ns()}"
+    locked = False
+    started = time.monotonic()
+    try:
+        if args.auto_approve:
+            with SharedState() as state:
+                locked = state.acquire_directory_lock(
+                    allowed_relative,
+                    engine=DIRECTORY_LOCK_ENGINE,
+                    model=args.model,
+                    session_id=session_id,
+                    reason="Antigravity headless write delegation",
+                )
+            if not locked:
+                _stderr(f"write scope is already locked: {allowed_relative}")
+                return 3
+
+        result, exit_code = run_agy_cli(
+            prompt=prompt,
+            model=args.model,
+            target_dir=target_dir,
+            agy_binary=agy_binary,
+            skip_permissions=args.auto_approve or args.allow_tools,
+            timeout_s=args.timeout,
+            conversation=args.conversation,
+            continue_latest=args.continue_latest,
+        )
+        if result.get("conversation_id"):
+            _stderr(f"conversation={result['conversation_id']} (resume with --conversation)")
+        if result.get("text"):
+            print(result["text"], end="" if result["text"].endswith("\n") else "\n")
+        if args.auto_approve:
+            changed = changed_workspace_paths(before, snapshot_workspace(target_dir))
+            outside = paths_outside_directory(changed, allowed_relative)
+            if outside:
+                _stderr("scope violation; changed outside --allow-dir: " + ", ".join(outside))
+                return 4
+        if result.get("denied_actions"):
+            names = ", ".join(
+                str(entry.get("action") or entry.get("display_name") or "unknown")
+                for entry in result["denied_actions"]
+            )
+            _stderr(
+                f"worker was denied permission for: {names}. Re-run with --allow-tools for "
+                "read/execute tools, or add a permissions.allow rule in agy settings.json."
+            )
+            return exit_code if exit_code == 124 else 5
+        if result.get("error") and _looks_like_quota_error(
+            f"{result['error']}\n{result.get('stderr', '')}"
+        ):
+            _stderr(
+                "worker appears to be out of Gemini quota. In the Antigravity CLI run "
+                "`/usage` to confirm, then `/logout` and sign in with another account; "
+                "resume this task with --conversation <id>."
+            )
+            return exit_code if exit_code == 124 else 6
+        if result.get("error"):
+            _stderr(str(result["error"]))
+            return exit_code if exit_code == 124 else 2
+        if not result.get("text"):
+            _stderr("worker produced no output and reported no error")
+            return exit_code if exit_code == 124 else 2
+        _stderr(f"model={args.model} elapsed={time.monotonic() - started:.1f}s exit={exit_code}")
+        return 0
+    finally:
+        if locked:
+            with SharedState() as state:
+                state.release_directory_lock(
+                    allowed_relative, engine=DIRECTORY_LOCK_ENGINE, session_id=session_id
+                )
+
+
+if __name__ == "__main__":
+    sys.exit(main())

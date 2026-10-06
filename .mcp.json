@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/specification/main/schema/mcp.schema.json",
+  "mcpServers": {
+    "sequential-thinking": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "description": "Chain-of-thought reasoning for complex problem solving. Free, no API key needed."
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "description": "Persistent knowledge graph memory across sessions. Free, local storage."
+    },
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"],
+      "description": "Live documentation lookup for libraries and frameworks. Free, no API key needed."
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp"],
+      "description": "Browser automation for E2E testing and web scraping. Free, no API key required. Requires: npx playwright install chromium"
+    }
+  },
+  "_comments": {
+    "github": "To enable GitHub MCP: add GITHUB_PERSONAL_ACCESS_TOKEN env var and uncomment the github section below",
+    "tips": "Keep under 8 MCPs enabled to preserve context window. Disable unused ones.",
+    "install_playwright": "Run 'npx playwright install chromium' once before using playwright MCP",
+    "notebooks": "A disabled 'notebooks' entry with an empty command used to live here to suppress an Antigravity pipe error (fa1e289). Claude Code rejected it as an invalid server config ('command cannot be empty') and reported it in `claude doctor` on every run. Removed 2026-08-05 — an entry that is disabled anyway is not worth a permanent validation error."
+  }
+}

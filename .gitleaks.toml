@@ -1,0 +1,26 @@
+[extend]
+useDefault = true
+
+[allowlist]
+# Security *documentation* recommending password-hashing algorithms. The
+# generic-api-key rule reads "Passwords: bcrypt/scrypt/argon2" as an
+# assignment; it is prose in the harness rulebooks, not a credential.
+regexes = [
+    '''bcrypt/scrypt/argon2''',
+]
+paths = [
+    '''\.venv''',
+    '''node_modules''',
+    '''gitleaks-report\.json''',
+    '''dist''',
+    '''build''',
+    '''\.ruff_cache''',
+    '''package-lock\.json''',
+    '''\.env''',
+    '''\.github/scripts/eval_harness\.py''',
+    # Synthetic secrets with correct SHAPE but no real credential -- this is
+    # the corpus that pins all three scanners' pattern coverage. Flagging it
+    # would force weakening the very patterns it exists to verify.
+    '''tools/test_secret_patterns\.py''',
+    '''tools/test_claude_guard\.py''',
+]

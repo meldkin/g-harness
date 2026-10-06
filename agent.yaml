@@ -1,0 +1,95 @@
+spec_version: "0.1.0"
+name: solo-code-harness
+version: 4.2.0
+description: "AI coding harness biến agent thành Solo-Code Engineer có kỷ luật. Multi-platform: OpenCode, Claude, Copilot, Gemini, Cursor, Kilo."
+author: "Solo-Code Team"
+license: MIT
+model:
+  preferred: deepseek-v4-pro
+  fallback:
+    - claude-sonnet-4-6
+    - gpt-5.5
+skills:
+  - agent-md-refactor
+  - algorithmic-discipline
+  - api-patterns
+  - block-no-verify
+  - brainstorming
+  - browser-testing-with-devtools
+  - ci-cd-and-automation
+  - claude-api
+  - code-review-expert
+  - codebase-design
+  - context-engineering
+  - custom-deploy-workflow
+  - debugging-and-error-recovery
+  - deprecation-and-migration
+  - documentation-and-adrs
+  - domain-modeling
+  - doubt-driven-development
+  - file-editor-pro
+  - frontend-ui-engineering
+  - gemini-delegation
+  - git-workflow-master
+  - handoff
+  - incident-investigation
+  - idea-refine
+  - improve-codebase-architecture
+  - incremental-implementation
+  - interview-me
+  - mcp-builder
+  - mcp-integrator
+  - observability-and-instrumentation
+  - performance-optimization
+  - permission-guard
+  - plan
+  - planning-and-task-breakdown
+  - requesting-code-review
+  - research
+  - resolving-merge-conflicts
+  - security-and-hardening
+  - shipping-and-launch
+  - simplify-code
+  - solo-code-harness
+  - source-driven-development
+  - spec-driven-development
+  - spike
+  - steering-and-course-correction
+  - subagent-driven-development
+  - systematic-debugging
+  - task-delegation
+  - testing-patterns
+  - ui-mock-hunter
+  - using-agent-skills
+  - wayfinder
+  - writing-great-skills
+agents:
+  - architect
+  - code-reviewer
+  - code-skeptic
+  - database-reviewer
+  - planner
+  - python-reviewer
+  - refactor-cleaner
+  - code-simplifier
+  - security-auditor
+  - solo-code-engineer
+  - tdd-guide
+  - test-engineer
+  - typescript-reviewer
+  - web-performance-auditor
+  - jev
+tags:
+  - agent-harness
+  - ai-coding
+  - code-review
+  - testing
+  - security
+  - cross-platform
+  - kilo
+  - opencode
+  - claude-code
+  - cursor
+  - github-copilot
+  - gemini
+  - freemodel
