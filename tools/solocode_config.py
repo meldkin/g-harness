@@ -49,6 +49,11 @@ PRICING: dict[str, dict[str, float]] = {
     # Legacy names (without [1m] suffix)
     "deepseek-v4-pro":       {"input": 0.435, "cache": 0.003625, "output": 0.87},
     "deepseek-v4-flash":     {"input": 0.14,  "cache": 0.0028,   "output": 0.28},
+    # Official API id for V4.1 Flash -- what harness_config [models].fallback now
+    # names. No price in the official /models response, so this carries over the
+    # retired v4-flash row; verify against the DeepSeek pricing page.
+    "deepseek-flash[1m]":    {"input": 0.14,  "cache": 0.0028,   "output": 0.28},
+    "deepseek-flash":        {"input": 0.14,  "cache": 0.0028,   "output": 0.28},
 }
 
 # Token consumption estimates (tokens per minute) — for cost estimation

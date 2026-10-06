@@ -227,20 +227,20 @@ _PROVIDER_MODELS: dict[str, dict[str, Any]] = {
 # Official DeepSeek API provider (plan.md A1). OpenAI-compatible endpoint fed by
 # DEEPSEEK_API_KEY + DEEPSEEK_BASE_URL from .env (see .env.template).
 # Verified 2026-10-06 against GET {DEEPSEEK_BASE_URL}/models: the official API
-# serves only these two ids. There is NO `deepseek-v4.1-flash` on the direct API
-# -- that id lives on CommandCode and OpenRouter instead. The /models response
-# omits context_length, so the context below is the harness 1M convention, not a
-# measured value.
+# serves two ids -- `deepseek-flash`, whose reported model name is
+# "DeepSeek-V4.1-Flash", and `deepseek-v4-pro`. So V4.1 Flash IS on the direct
+# API, under the id `deepseek-flash` (there is no `deepseek-v4.1-flash` here).
+# Both report context_window 1,048,576 and max_output_tokens 393,216.
 _DEEPSEEK_MODELS: dict[str, dict[str, Any]] = {
+    "deepseek-flash": {
+        "modelID": "deepseek-flash",
+        "name": "DeepSeek V4.1 Flash (official)",
+        "limit": {"context": 1048576, "output": 393216},
+    },
     "deepseek-v4-pro": {
         "modelID": "deepseek-v4-pro",
         "name": "DeepSeek V4 Pro (official)",
-        "limit": {"context": 1000000, "output": 384000},
-    },
-    "deepseek-flash": {
-        "modelID": "deepseek-flash",
-        "name": "DeepSeek Flash (official)",
-        "limit": {"context": 1000000, "output": 384000},
+        "limit": {"context": 1048576, "output": 393216},
     },
 }
 

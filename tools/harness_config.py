@@ -66,7 +66,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "models": {
         "default": "deepseek-v4-pro[1m]",
-        "fallback": "deepseek-v4-flash[1m]",
+        "fallback": "deepseek-flash[1m]",
     },
     "verify_on_commit": True,
     "auto_verify_before_push": True,
@@ -429,7 +429,7 @@ disabled = []
 [models]
 # Default and fallback model names.
 default = "deepseek-v4-pro[1m]"
-fallback = "deepseek-v4-flash[1m]"
+fallback = "deepseek-flash[1m]"
 
 # Verify gates on every commit (hooks.PostToolUse quality-gate).
 verify_on_commit = true

@@ -235,20 +235,20 @@
         "baseURL": "${DEEPSEEK_BASE_URL}"
       },
       "models": {
+        "deepseek-flash": {
+          "modelID": "deepseek-flash",
+          "name": "DeepSeek V4.1 Flash (official)",
+          "limit": {
+            "context": 1048576,
+            "output": 393216
+          }
+        },
         "deepseek-v4-pro": {
           "modelID": "deepseek-v4-pro",
           "name": "DeepSeek V4 Pro (official)",
           "limit": {
-            "context": 1000000,
-            "output": 384000
-          }
-        },
-        "deepseek-flash": {
-          "modelID": "deepseek-flash",
-          "name": "DeepSeek Flash (official)",
-          "limit": {
-            "context": 1000000,
-            "output": 384000
+            "context": 1048576,
+            "output": 393216
           }
         }
       }

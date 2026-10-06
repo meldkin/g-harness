@@ -59,12 +59,12 @@ High-signal context loaded at session start. Detailed history belongs in
 - [decision] Step 5 Preview model routes (2026-10-06): four OpenCode v2 providers --
   `commandcode`, `freemodel`, `deepseek` (official), `openrouter` -- 31 models total.
   `_SMALL_MODEL` moved to `commandcode/deepseek-v4.1-flash`. Ids were verified live:
-  the official DeepSeek API serves only `deepseek-v4-pro` and `deepseek-flash` (no
-  `deepseek-v4.1-flash`); that id exists on CommandCode (84 models) and OpenRouter
-  (465 models). OpenRouter's endpoint is a fixed public constant; only
-  `OPENROUTER_API_KEY` is secret. `Space Bunny Alpha` is absent from every catalog and
-  was dropped. A new orchestrator agent `jev` routes between DeepSeek V4.1 Flash,
-  Gemini/Antigravity, and OpenCode CLI.
+  the official DeepSeek API names V4.1 Flash **`deepseek-flash`** (reported name
+  "DeepSeek-V4.1-Flash", ctx 1,048,576); the id `deepseek-v4.1-flash` exists on
+  CommandCode (84 models) and OpenRouter (465 models). OpenRouter's endpoint is a
+  fixed public constant; only `OPENROUTER_API_KEY` is secret. `Space Bunny Alpha` is
+  absent from every catalog and was dropped. A new orchestrator agent `jev` routes
+  between DeepSeek V4.1 Flash, Gemini/Antigravity, and OpenCode CLI.
 - [decision] Antigravity headless `agy.exe` delegate **re-established** after
   the retirement rationale was disproven: the account lockouts were a
   Google-side update bug, not bot-traffic flags from `agy.exe`; the accounts

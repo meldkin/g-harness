@@ -95,13 +95,16 @@ The harness declares a self-contained `deepseek` provider in
 `https://api.deepseek.com/v1`.
 
 Verified 2026-10-06 against `GET {DEEPSEEK_BASE_URL}/models`: the official API
-serves exactly two ids. **`deepseek-v4.1-flash` is NOT on the direct API** — that
-model is served by CommandCode and OpenRouter instead.
+serves two ids, both reporting `context_window` 1,048,576 and
+`max_output_tokens` 393,216.
 
-| Model ID | Best For |
-|----------|----------|
-| `deepseek-v4-pro` | Flagship, deep reasoning |
-| `deepseek-flash` | Fast, cheap |
+| Model ID | Reported name | Best For |
+|----------|---------------|----------|
+| `deepseek-flash` | DeepSeek-V4.1-Flash | DeepSeek V4.1 Flash on the direct API |
+| `deepseek-v4-pro` | DeepSeek-V4-Pro | Flagship, deep reasoning |
+
+> The direct API names V4.1 Flash **`deepseek-flash`**. The id
+> `deepseek-v4.1-flash` exists only on CommandCode and OpenRouter.
 
 ### Available Models via OpenRouter
 

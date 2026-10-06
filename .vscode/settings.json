@@ -237,8 +237,8 @@
       "version": "xiaomi/mimo-v2.5-pro"
     },
     {
-      "name": "DeepSeek Flash (official)",
-      "description": "DeepSeek Flash — direct DeepSeek API",
+      "name": "DeepSeek V4.1 Flash (official)",
+      "description": "DeepSeek V4.1 Flash via the direct DeepSeek API (id: deepseek-flash, 1M context)",
       "vendor": "deepseek",
       "family": "deepseek",
       "model": "deepseek-flash",
