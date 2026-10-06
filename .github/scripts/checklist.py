@@ -163,7 +163,7 @@ def main():
         results.append(
             run_check(
                 "Secret Scan",
-                [sys.executable, str(scanner), str(project_path)],
+                [sys.executable, str(scanner), str(project_path), "--strict"],
                 timeout=120,
             )
         )

@@ -34,7 +34,7 @@ jobs:
         shell: bash
 
       - name: Security Scan
-        run: python .github/scripts/security_scan.py .
+        run: python .github/scripts/security_scan.py . --strict
         shell: bash
 
       - name: Ruff Lint
