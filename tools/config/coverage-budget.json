@@ -1,6 +1,6 @@
 {
   "files": {
-    ".claude\\hooks\\guard.py": 37.23,
+    ".claude\\hooks\\guard.py": 38.13,
     ".claude\\hooks\\session_start.py": 15.98,
     ".github\\scripts\\__init__.py": 100.0,
     ".github\\scripts\\boundary_audit.py": 45.54,
