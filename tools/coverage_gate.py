@@ -38,7 +38,9 @@ def load_budget(budget_file: Path = BUDGET_FILE) -> dict[str, float]:
     Raises on malformed JSON.
     """
     if not budget_file.exists():
-        return
+        # `return` here made load_budget() return None, and --report then did
+        # None.keys() -> AttributeError. Latent only while the budget file exists.
+        return {}
 
     try:
         payload = json.loads(budget_file.read_text(encoding="utf-8"))

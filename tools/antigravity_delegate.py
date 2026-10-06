@@ -50,7 +50,9 @@ def _make_streams_encoding_safe() -> None:
 
     agy frequently returns non-Latin characters (arrows, em-dashes, box drawing);
     printing those to a cp1252 console on Windows raises UnicodeEncodeError and
-    would discard the whole result. Keep the console's encoding, only relax errors.
+    would discard the whole result. This does NOT preserve the console's encoding:
+    it switches the streams to UTF-8 with `errors=replace`, so an unrepresentable
+    character becomes a substitute glyph instead of killing the run.
     """
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)

@@ -722,12 +722,17 @@ def generate_all(
     if generate_agents(kilo_root, opencode_root) != 0:
         return 1
     print("--- OpenCode commands ---")
-    generate_commands(kilo_root, opencode_root)
+    if generate_commands(kilo_root, opencode_root) != 0:
+        return 1
     print("--- OpenCode skills ---")
-    prune_duplicate_skills(kilo_root, opencode_root)
+    if prune_duplicate_skills(kilo_root, opencode_root) != 0:
+        return 1
     print("--- OpenCode instructions ---")
-    prune_instructions(opencode_root)
-    generate_instruction_skills(kilo_root, opencode_root)
+    if prune_instructions(opencode_root) != 0:
+        return 1
+    if generate_instruction_skills(kilo_root, opencode_root) != 0:
+        return 1
     print("--- OpenCode config ---")
-    generate_opencode_json(opencode_root, root_dir, collect_disabled_skills(kilo_root))
+    if generate_opencode_json(opencode_root, root_dir, collect_disabled_skills(kilo_root)) != 0:
+        return 1
     return 0

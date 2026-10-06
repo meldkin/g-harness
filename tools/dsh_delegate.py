@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Run the DeepSeek Harness (dsh) as a read-only worker behind harness guardrails.
+"""Run the DeepSeek Harness (dsh) as a worker in a sibling checkout.
 
-dsh lives in a sibling checkout (`reference/deepseek-harness-master/`) and runs
-from source with `pnpm dsh --profile <name> "<task>"`. This wrapper locates that
-checkout, loads `DEEPSEEK_API_KEY` from the project `.env`, runs the task, and
-returns its output. Read-only by default; write scope is not supported yet.
+dsh lives in `reference/deepseek-harness-master/` and runs from source with
+`pnpm dsh --profile <name> "<task>"`. This wrapper locates that checkout, loads
+`DEEPSEEK_API_KEY` from the project `.env`, runs the task, and returns its output.
+
+This wrapper injects NO guardrail prompt, takes no directory lock, and runs no
+post-run scope audit -- unlike `antigravity_delegate.py`. Whatever the task can
+write, it writes: containment comes from the dsh profile it launches, not from
+this file. Pass a read-only profile if you need read-only.
 
 UNVERIFIED: dsh has not been installed or built on this machine beyond checking
 that its prerequisites (Node >= 22.19, pnpm) are satisfied, so this wrapper's
@@ -181,7 +185,9 @@ def main(argv: list[str] | None = None) -> int:
     for key, value in load_env_file(ROOT / ".env").items():
         if key in ENV_KEYS and value:
             env[key] = value
-    missing = [key for key in ENV_KEYS if key == "DEEPSEEK_API_KEY" and not env.get(key)]
+    # Only the API key is required; DEEPSEEK_BASE_URL is loaded when present but
+    # has a working default, so it is not part of the missing check.
+    missing = ["DEEPSEEK_API_KEY"] if not env.get("DEEPSEEK_API_KEY") else []
     if missing:
         _stderr(f"{', '.join(missing)} not set; dsh needs it to call a model.")
         return 1

@@ -33,8 +33,16 @@ def test_main_short_help_flag(monkeypatch, capsys):
 
 
 def test_load_budget_missing_file(tmp_path):
-    """Missing budget file returns empty dict."""
-    assert coverage_gate.load_budget(tmp_path / "nonexistent.json") is None
+    """Missing budget file returns an empty dict -- not None.
+
+    The old bare `return` made this None despite the docstring promising an
+    empty dict. The test pinned that: it asserted `is None`, so `--report`'s
+    `set(budget.keys())` raised AttributeError on a first run and nothing
+    caught it.
+    """
+    result = coverage_gate.load_budget(tmp_path / "nonexistent.json")
+    assert result == {}
+    assert list(result.keys()) == []
 
 
 def test_load_budget_valid(tmp_path):
