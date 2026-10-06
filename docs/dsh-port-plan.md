@@ -3,7 +3,7 @@
 > Tác giả: Kilo
 > Đã đánh giá: Claude Code (orchestrator)
 > Ngày: 2026-08-15
-> Trạng thái: **Đã chốt — tầng A duy nhất, B/C bị chặn bởi môi trường**
+> Trạng thái: **Tầng A đã xong. Tầng B/C tưởng bị chặn (2026-08-15) — ĐÃ HẾT CHẶN (2026-10-06), xem §0.1**
 
 ---
 
@@ -18,6 +18,24 @@ Tầng B/C (adopt dsh SDK / runtime) **không thực thi** — bị chặn bởi
 | Q4 — pnpm | `10.33.0` | Thỏa (điểm duy nhất đạt) |
 
 **Chỉ làm tầng A**: A1 (bản đồ ánh xạ + đọc notes/postmortem gộp chung) → A2 (subagent interface, chưa refactor) → A3 (compaction pruner, sau khi chốt injection point).
+
+---
+
+## 0.1 Trạng thái 2026-10-06 (đo lại — §0 KHÔNG còn đúng)
+
+| Rào cản cũ | §0 ghi (2026-08-15) | Đo lại (2026-10-06) | Còn chặn? |
+|---|---|---|---|
+| Q3 — `DEEPSEEK_API_KEY` | NOT SET | có trong `g-harness/.env` | ❌ Hết |
+| Q4 — Node | `v22.12.0` | **`v22.23.2`** (thỏa `^22.19 \|\| >=24`) | ❌ Hết |
+| Q4 — pnpm | `10.33.0` | `11.7.0` | ❌ Hết |
+
+**Hệ quả:** tầng B (chạy `dsh` như worker thứ ba qua subprocess) nay **khả thi**.
+Điều kiện §A2 cho `tools/subagent_seam.py` ("chỉ refactor khi có ≥2 provider") cũng
+đã đủ. Đề xuất: thêm `tools/dsh_delegate.py` (đối xứng `antigravity_delegate.py`).
+
+**Vẫn giữ nguyên:** KHÔNG merge code DSH/Cordis vào harness — chỉ gọi subprocess
+(SPEC §0.1.1: "config trỏ xuống native, không clone native"). DSH giữ ở
+`reference/deepseek-harness-master/`.
 
 ---
 
