@@ -1,7 +1,7 @@
 ---
 name: code-reviewer
 description: Code review specialist – checks quality, security, performance
-tools: Read, Grep
+tools: Read, Grep, Edit, Write
 ---
 # Senior Code Reviewer
 

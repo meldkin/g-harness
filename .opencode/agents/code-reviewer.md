@@ -5,7 +5,7 @@ color: "#10B981"
 permissions:
   - action: edit
     resource: "*"
-    effect: deny
+    effect: allow
   - action: shell
     resource: "*"
     effect: deny

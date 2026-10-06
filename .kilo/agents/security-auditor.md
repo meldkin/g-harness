@@ -3,7 +3,7 @@ description: "Security auditor – scans for secrets, vulnerabilities, misconfig
 mode: subagent
 color: "#EF4444"
 permission:
-  edit: deny
+  edit: allow
   read: allow
   grep: allow
   bash:
