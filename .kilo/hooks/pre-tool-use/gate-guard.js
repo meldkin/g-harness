@@ -20,13 +20,23 @@
 const MAX_STDIN = 1024 * 1024;
 
 // ─── BLOCK PATTERNS (exit 2) ───────────────────────────────────────────────
+// Any-order recursive/force flags: `-rf`, `-fr`, `-r -f`, `--recursive --force`.
+// The old literal `-rf?` accepted only `-r`/`-rf`, so `rm -fr /` walked past the
+// root-wipe guard, and `rm_no_preserve` required the flag immediately after
+// `rm `, so `rm -rf --no-preserve-root /` passed too. Keep in sync with
+// .claude/hooks/guard.py (`_RM_FLAGS`).
+const RM_FLAGS = '(?:-{1,2}[a-zA-Z][a-zA-Z-]*\\s+)*';
 const BLOCK_PATTERNS = [
-  { name: 'rm_root', pattern: /rm\s+-rf?\s+\/(?:\s|$|\*|"|')/ },
-  { name: 'rm_home', pattern: /rm\s+-rf?\s+~/ },
-  { name: 'rm_wildcard', pattern: /rm\s+-rf?\s+\*/ },
-  { name: 'rm_no_preserve', pattern: /rm\s+--no-preserve-root/ },
+  { name: 'rm_root', pattern: new RegExp('rm\\s+' + RM_FLAGS + '/(?:\\s|$|\\*|"|\')') },
+  { name: 'rm_home', pattern: new RegExp('rm\\s+' + RM_FLAGS + '~') },
+  { name: 'rm_wildcard', pattern: new RegExp('rm\\s+' + RM_FLAGS + '\\*') },
+  { name: 'rm_no_preserve', pattern: /rm\s+.*--no-preserve-root/ },
   { name: 'force_push_main', pattern: /git\s+push\s+.*(--force|-f)\s+.*(main|master)/ },
-  { name: 'git_reset_hard', pattern: /git\s+reset\s+--hard/ },
+  // The flag may follow the branch (`git push origin main --force`) or be absent
+  // entirely (`git push --force`, `git push -f`). `--force-with-lease` stays
+  // allowed: it is the safe alternative this harness recommends.
+  { name: 'force_push_any', pattern: /git\s+push\b.*(?:--force\b(?!-)|(?:^|\s)-f\b)/ },
+  { name: 'git_reset_hard', pattern: /git\b.*\breset\b.*--hard/ },
   { name: 'drop_table', pattern: /DROP\s+(?:TABLE|DATABASE)/i },
   { name: 'truncate_table', pattern: /TRUNCATE\s+TABLE/i },
   { name: 'dd_raw', pattern: /dd\s+if=/ },
@@ -34,7 +44,7 @@ const BLOCK_PATTERNS = [
   { name: 'shred', pattern: /shred\s+/ },
   { name: 'dev_write', pattern: />\s*\/dev\/sd[a-z]/ },
   { name: 'win_del_force', pattern: /del\s+\/f\s+\/s/ },
-  { name: 'win_remove_recursive', pattern: /Remove-Item\s+.*-Recurse.*-Force/ },
+  { name: 'win_remove_recursive', pattern: /Remove-Item\s+.*-Recurse.*-Force/i },
   // Anchored to a real format invocation: `format` in command position with a
   // drive letter or /fs: switch. A bare /\bformat\s/ also matched
   // `--output-format json`, so the guard blocked ruff and grep -- and a guard
