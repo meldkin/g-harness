@@ -939,3 +939,128 @@ def test_doc_scan_falls_back_to_static_set_outside_git(tmp_path):
 
     assert skip == garden._SCAN_SKIP_DIRS
     assert "somedir" not in skip
+
+
+# ─── check_agent_permissions / check_claude_agent_tools ─────────────────────
+
+_AGENT_ALLOW = """---
+name: reviewer
+permission:
+  edit: allow
+  read: allow
+---
+
+Body.
+"""
+
+_AGENT_DENY = """---
+name: reviewer
+permission:
+  edit: deny
+  read: allow
+---
+
+Body.
+"""
+
+
+def test_permission_block_keeps_scalar_and_nested_rules(tmp_path):
+    agent = tmp_path / "a.md"
+    _write(
+        agent,
+        "---\nname: a\npermission:\n  edit: allow\n  bash:\n"
+        '    "*": deny\n    "git diff*": allow\n---\nbody\n',
+    )
+
+    assert garden._permission_block(agent) == (
+        'permission:\n  edit: allow\n  bash:\n    "*": deny\n    "git diff*": allow'
+    )
+
+
+def test_permission_block_absent_is_empty(tmp_path):
+    agent = tmp_path / "a.md"
+    _write(agent, "---\nname: a\n---\nbody\n")
+
+    assert garden._permission_block(agent) == ""
+
+
+def test_permission_block_stops_at_next_top_level_key(tmp_path):
+    agent = tmp_path / "a.md"
+    _write(agent, "---\npermission:\n  edit: allow\ncolor: \"#fff\"\n---\nbody\n")
+
+    assert garden._permission_block(agent) == "permission:\n  edit: allow"
+
+
+def test_check_agent_permissions_detects_an_edit_that_reached_one_engine(tmp_path):
+    """The regression this check exists for: `edit: deny` -> `edit: allow` landed
+    in .kilo/ and .opencode/ while .copilot/ kept the old value, and the older
+    filename-only parity check reported the engine clean."""
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    _write(src / "agents" / "reviewer.md", _AGENT_ALLOW)
+    _write(dst / "agents" / "reviewer.md", _AGENT_DENY)
+
+    issues = garden.check_agent_permissions(src, dst, ".copilot")
+
+    assert len(issues) == 1
+    assert "Permission drift" in issues[0]
+    assert "reviewer.md" in issues[0]
+
+
+def test_check_agent_permissions_clean_when_identical(tmp_path):
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    _write(src / "agents" / "reviewer.md", _AGENT_ALLOW)
+    _write(dst / "agents" / "reviewer.md", _AGENT_ALLOW)
+
+    assert garden.check_agent_permissions(src, dst, ".copilot") == []
+
+
+def test_check_agent_permissions_defers_missing_copy_to_check_agents(tmp_path):
+    """A missing mirror file is check_agents()' finding; this check must not
+    duplicate it, or every new agent would report twice."""
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    _write(src / "agents" / "reviewer.md", _AGENT_ALLOW)
+    (dst / "agents").mkdir(parents=True)
+
+    assert garden.check_agent_permissions(src, dst, ".copilot") == []
+
+
+def test_check_agent_permissions_silent_when_dirs_absent(tmp_path):
+    assert garden.check_agent_permissions(tmp_path / "src", tmp_path / "dst", ".x") == []
+
+
+def test_check_claude_agent_tools_detects_stale_allowlist(tmp_path):
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    _write(src / "agents" / "reviewer.md", _AGENT_ALLOW)
+    _write(dst / "agents" / "reviewer.md", "---\nname: reviewer\ntools: Read\n---\nBody.\n")
+
+    issues = garden.check_claude_agent_tools(src, dst)
+
+    assert len(issues) == 1
+    assert "Agent tools drift" in issues[0]
+    assert "tools=[Read, Edit, Write]" in issues[0]
+
+
+def test_check_claude_agent_tools_clean_when_derived_from_source(tmp_path):
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    _write(src / "agents" / "reviewer.md", _AGENT_ALLOW)
+    _write(
+        dst / "agents" / "reviewer.md",
+        "---\nname: reviewer\ntools: Read, Edit, Write\n---\nBody.\n",
+    )
+
+    assert garden.check_claude_agent_tools(src, dst) == []
+
+
+def test_live_repo_has_zero_agent_permission_drift():
+    kilo = ROOT / ".kilo"
+    for engine_dir, label in (
+        (ROOT / ".copilot", ".copilot"),
+        (ROOT / ".gemini" / "antigravity", ".gemini/antigravity"),
+    ):
+        issues = garden.check_agent_permissions(kilo, engine_dir, label)
+        assert issues == [], f"{label} agent permission drift: {issues}"
+
+
+def test_live_repo_claude_agent_tools_match_their_source():
+    issues = garden.check_claude_agent_tools(ROOT / ".kilo", ROOT / ".claude")
+    assert issues == [], f".claude agent tools drift: {issues}"
