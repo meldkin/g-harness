@@ -94,12 +94,6 @@ High-signal context loaded at session start. Detailed history belongs in
   has no project hooks. Of the gateway's aliases only `gpt-5.6-terra` routes
   reproducibly; the rest are unstable or dead — measurements and traps are in
   `decisions-archive.md` (2026-09-14).
-- [decision] Codex write path: verified that `Set-Content` is not blocked by
-  Codex CLI; earlier failure was caused by compound commands ending in
-  `Remove-Item -Force` triggering `exec_policy.rs` `rm -f` heuristic under
-  `approval_policy = "never"`. Added verified write path to `tools/codex_guard.py`
-  (`--write` flag with secret scanning and shared state file locking) alongside
-  native `apply_patch` (2026-09-25).
 - [decision] CommandCode model ids are verified against
   `GET {COMMANDCODE_BASE_URL}/models`, never from memory: the catalog drifts and
   the old `api-providers.md` advertised nine ids that no longer resolve. Each
@@ -109,9 +103,10 @@ High-signal context loaded at session start. Detailed history belongs in
   upstream id (`commandcode/deepseek/deepseek-v4-pro`) while OpenCode refs use the
   harness key (`commandcode/deepseek-v4-pro`) — both correct for their dialect.
   `context_length` comes from the `/models` response, not the file. (2026-09-28)
-- [decision] Subagent `ask` permission behaves as `allow` (measured 2026-10-07):
-  a headless child session has no prompt channel, so `effect: ask` silently
-  permits. Use explicit `allow`/`deny` for subagents; never `ask`.
+- [decision] Subagent `ask` permission behaves as `allow` (measured,
+  operator-confirmed 2026-10-07): a headless child session has no prompt
+  channel, so `effect: ask` silently permits -- the operator saw no dialog
+  appear during a two-command probe. Use explicit `allow`/`deny`; never `ask`.
 - [decision] Guard hardening (2026-10-07), mirrored in `.claude/hooks/guard.py`
   and `.kilo/hooks/pre-tool-use/gate-guard.js`: shared `_RM_FLAGS` takes any
   `-r`/`-f` order, `force_push_any` matches a trailing `--force`, and

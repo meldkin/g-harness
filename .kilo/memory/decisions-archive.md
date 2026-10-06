@@ -458,6 +458,13 @@ Moved verbatim out of `MEMORY.md` to stay under the `memory_gate` hard cap.
 
 - [decision] Claude launchers default to full mode; `--bare` is explicit
   degraded mode.
+- [decision] Codex write path: verified that `Set-Content` is not blocked by
+  Codex CLI; earlier failure was caused by compound commands ending in
+  `Remove-Item -Force` triggering `exec_policy.rs` `rm -f` heuristic under
+  `approval_policy = "never"`. Added verified write path to `tools/codex_guard.py`
+  (`--write` flag with secret scanning and shared state file locking) alongside
+  native `apply_patch` (2026-09-25). Moved here 2026-10-07: MEMORY.md was within
+  19 bytes of the 8,000-char cap.
 
 ## Coverage ratchet reset (2026-10-07)
 
