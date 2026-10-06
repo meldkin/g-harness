@@ -458,3 +458,30 @@ Moved verbatim out of `MEMORY.md` to stay under the `memory_gate` hard cap.
 
 - [decision] Claude launchers default to full mode; `--bare` is explicit
   degraded mode.
+
+## Coverage ratchet reset (2026-10-07)
+
+`tools/coverage_gate.py --update` was run to clear a long-standing failure.
+Justification, in full:
+
+- **Accepted (pre-existing, not from this session):**
+  `tools/test_check_lint_budget.py` 98.63 -> 96.84. All three uncovered lines are
+  unreachable by design: two are the `raise AssertionError(...)` bodies of the
+  `boom` helpers that only run when the guard they assert has failed, one is the
+  `sys.path.insert` branch never taken under pytest. `tools/deploy.py`
+  41.25 -> 41.0: two tenths of a percent on 700 statements, no behaviour change;
+  the real gap is 413 uncovered statements at 41%.
+- **NOT accepted:** the `tools/garden.py` regression was caused by this series and
+  was fixed with four real tests covering the new branches, clearing the gate on
+  its own.
+- **Collateral, and a tightening:** 28 files previously absent from the budget
+  entered it, and 23 floors were raised because they were too low to mean
+  anything — `.github/scripts/checklist.py` and `boundary_audit.py` were pinned at
+  0.0 while measuring 39.8 and 45.5; `tools/claude_engine.py` went 37.72 -> 87.35.
+- **Open debt:** 13 tracked files sit at 0.0%, meaning no test imports them:
+  `codex_session`, `codex_usage`, `codex_verify`, `compaction`,
+  `compaction_pruner`, `dsh_delegate`, `harness_config`, `kilo_server_manager`,
+  `kilo_usage_report`, `session_analytics`, `solocode_config`,
+  `.github/scripts/check_skips`, `.github/scripts/eval_harness`. A 0.0 floor is
+  not a floor — the ratchet cannot detect a regression in any of them.
+

@@ -1051,6 +1051,29 @@ def test_check_claude_agent_tools_clean_when_derived_from_source(tmp_path):
     assert garden.check_claude_agent_tools(src, dst) == []
 
 
+def test_check_claude_agent_tools_silent_when_dirs_absent(tmp_path):
+    assert garden.check_claude_agent_tools(tmp_path / "src", tmp_path / "dst") == []
+
+
+def test_check_claude_agent_tools_defers_missing_copy_to_check_agents(tmp_path):
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    _write(src / "agents" / "reviewer.md", _AGENT_ALLOW)
+    (dst / "agents").mkdir(parents=True)
+
+    assert garden.check_claude_agent_tools(src, dst) == []
+
+
+def test_check_claude_agent_tools_skips_frontmatter_less_files(tmp_path):
+    """A mirror with no frontmatter has no `tools:` line to compare. The missing
+    or malformed copy is check_agents()' finding, so this check stays silent
+    rather than inventing a second report for the same file."""
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    _write(src / "agents" / "reviewer.md", _AGENT_ALLOW)
+    _write(dst / "agents" / "reviewer.md", "Body only, no frontmatter.\n")
+
+    assert garden.check_claude_agent_tools(src, dst) == []
+
+
 def test_live_repo_has_zero_agent_permission_drift():
     kilo = ROOT / ".kilo"
     for engine_dir, label in (
