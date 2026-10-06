@@ -53,7 +53,7 @@ say ""
 
 # ── Engine directories ──────────────────────────────────────────────────
 say "[ENGINE DIRS]"
-for pair in ".kilo:Kilo" ".claude:Claude Code" ".copilot:Copilot" ".gemini:Gemini"; do
+for pair in ".kilo:Kilo" ".opencode:OpenCode" ".claude:Claude Code" ".copilot:Copilot" ".gemini:Gemini"; do
   dir="${pair%%:*}"; label="${pair#*:}"
   [ -d "$dir" ] && say "  [x] $label ($dir/)"
 done

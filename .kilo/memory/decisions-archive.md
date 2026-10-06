@@ -451,3 +451,10 @@ created: 2026-07-24
   which answers 404, and omits `gpt-6.1-sol`). Declared models are `gpt-6-sol`,
   `gpt-6-astra`, `gpt-6.1-sol`; every other name routes to `gpt-6-sol`
   server-side, so extra aliases add no capability.
+
+## Pruned 2026-10-07 (mem cap)
+
+Moved verbatim out of `MEMORY.md` to stay under the `memory_gate` hard cap.
+
+- [decision] Claude launchers default to full mode; `--bare` is explicit
+  degraded mode.

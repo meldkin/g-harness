@@ -88,8 +88,6 @@ High-signal context loaded at session start. Detailed history belongs in
   audit); it is mutually exclusive with `--auto-approve`, `--allow-dir`, and
   `--no-guardrail`. `view_file` works read-only with an absolute path;
   `grep_search`/`list_dir` usage was unreliable at the low model tier.
-- [decision] Claude launchers default to full mode; `--bare` is explicit
-  degraded mode.
 - [decision] OpenCode avoids duplicate skill mirrors and uses Claude-compatible
   skills.
 - [decision] Codex lifecycle and guard behavior is launcher-based, because Codex
@@ -111,3 +109,16 @@ High-signal context loaded at session start. Detailed history belongs in
   upstream id (`commandcode/deepseek/deepseek-v4-pro`) while OpenCode refs use the
   harness key (`commandcode/deepseek-v4-pro`) — both correct for their dialect.
   `context_length` comes from the `/models` response, not the file. (2026-09-28)
+- [decision] Subagent `ask` permission behaves as `allow` (measured 2026-10-07):
+  a headless child session has no prompt channel, so `effect: ask` silently
+  permits. Use explicit `allow`/`deny` for subagents; never `ask`.
+- [decision] Guard hardening (2026-10-07), mirrored in `.claude/hooks/guard.py`
+  and `.kilo/hooks/pre-tool-use/gate-guard.js`: shared `_RM_FLAGS` takes any
+  `-r`/`-f` order, `force_push_any` matches a trailing `--force`, and
+  `env_assignment_secret` catches unquoted `NAME=value`. `--force-with-lease`
+  and `KEY="$(...)"` stay allowed on purpose.
+- [decision] Subagent reviewers hold `read` + `edit`, no shell for
+  `code-reviewer`. Garden gained "Permission drift" (agent `permission:` block
+  vs `.copilot`/`.gemini`) and "Agent tools drift" (derived `.claude` `tools:`);
+  the old `check_agents` compared filenames only and reported clean while the
+  engines disagreed (2026-10-07).

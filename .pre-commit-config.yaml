@@ -4,12 +4,10 @@ repos:
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
-        exclude: ^(\.kilo/|\.opencode/|cocoindex-code-main/)
+        exclude: ^(\.kilo/|\.opencode/)
       - id: check-yaml
         args: [--allow-multiple-documents]
-        exclude: ^cocoindex-code-main/
       - id: check-json
-        exclude: ^cocoindex-code-main/
       - id: check-added-large-files
         args: [--maxkb=500]
       - id: check-merge-conflict
