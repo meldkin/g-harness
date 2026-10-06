@@ -50,8 +50,21 @@ High-signal context loaded at session start. Detailed history belongs in
 - [gotcha] Keep loaded memory under 8,000 chars. MOVE pruned material into
   `decisions-archive.md` verbatim — never silently delete it.
 - [gotcha] `.pytest_temp` cleanup can race on Windows; rerun pytest if needed.
+- [gotcha] `check_lint_budget` honours `.gitignore` only when the tree is a git
+  repo. Without `.git/`, ruff still scans `.pytest_temp*/` and the count overshoots
+  the budget (measured 49 vs 45 on the pristine tree). Run `git init` before
+  trusting the gate.
 
 ## Decisions
+- [decision] Step 5 Preview model routes (2026-10-06): four OpenCode v2 providers --
+  `commandcode`, `freemodel`, `deepseek` (official), `openrouter` -- 31 models total.
+  `_SMALL_MODEL` moved to `commandcode/deepseek-v4.1-flash`. Ids were verified live:
+  the official DeepSeek API serves only `deepseek-v4-pro` and `deepseek-flash` (no
+  `deepseek-v4.1-flash`); that id exists on CommandCode (84 models) and OpenRouter
+  (465 models). OpenRouter's endpoint is a fixed public constant; only
+  `OPENROUTER_API_KEY` is secret. `Space Bunny Alpha` is absent from every catalog and
+  was dropped. A new orchestrator agent `jev` routes between DeepSeek V4.1 Flash,
+  Gemini/Antigravity, and OpenCode CLI.
 - [decision] Antigravity headless `agy.exe` delegate **re-established** after
   the retirement rationale was disproven: the account lockouts were a
   Google-side update bug, not bot-traffic flags from `agy.exe`; the accounts
