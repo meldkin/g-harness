@@ -31,10 +31,11 @@ Headless note (all found on a real run):
   - `pnpm build` needs a Git commit hash for browser build metadata; a checkout
     with no `.git` fails `git rev-parse HEAD`, so export
     `DSH_CLIENT_COMMIT_HASH=<7-hex>` for that run.
-  - after all that the run reaches the model. `HTTP_404 ... DeepSeek Messages`
-    means the `headless` profile's protocol does not match this project's
-    `DEEPSEEK_BASE_URL` (the .env value is the OpenAI-compatible `/v1` host) --
-    a profile/config matter on the dsh side, not this wrapper.
+  - the harness's `.env` `DEEPSEEK_BASE_URL` (an OpenAI-compatible `/v1` root) is
+    deliberately NOT forwarded: it does not match dsh's default `messages`
+    protocol (root `https://api.deepseek.com/anthropic`) and caused an
+    `HTTP_404 ... DeepSeek Messages`. Set `DEEPSEEK_BASE_URL` in the process
+    environment only when you really mean to override dsh's endpoint.
 """
 
 from __future__ import annotations
@@ -51,7 +52,13 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TIMEOUT_SECONDS = 600
 
 # Minimal environment variable names dsh reads for a real run.
-ENV_KEYS = ("DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL")
+API_KEY_ENVS = ("DEEPSEEK_API_KEY",)
+# Forwarded only when the operator set them in the PROCESS environment. The .env
+# value is the harness's OpenAI-compatible root (https://api.deepseek.com/v1),
+# which does NOT match dsh's default `messages` protocol -- its root is
+# https://api.deepseek.com/anthropic -- and the mismatch produced an HTTP 404.
+# Leaving it unset lets dsh fall back to its own correct default.
+PASSTHROUGH_ENVS = ("DEEPSEEK_BASE_URL",)
 
 
 def _stderr(message: str) -> None:
@@ -220,12 +227,18 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     env = os.environ.copy()
-    for key, value in load_env_file(ROOT / ".env").items():
-        if key in ENV_KEYS and value:
+    file_env = load_env_file(ROOT / ".env")
+    for key in API_KEY_ENVS:
+        value = os.environ.get(key) or file_env.get(key)
+        if value:
             env[key] = value
-    # Only the API key is required; DEEPSEEK_BASE_URL is loaded when present but
-    # has a working default, so it is not part of the missing check.
-    missing = ["DEEPSEEK_API_KEY"] if not env.get("DEEPSEEK_API_KEY") else []
+    # Base URLs come only from the process environment (explicit intent); the
+    # .env one is the harness's OpenAI-compatible root, wrong for dsh. See
+    # PASSTHROUGH_ENVS.
+    for key in PASSTHROUGH_ENVS:
+        if key in os.environ:
+            env[key] = os.environ[key]
+    missing = [key for key in API_KEY_ENVS if not env.get(key)]
     if missing:
         _stderr(f"{', '.join(missing)} not set; dsh needs it to call a model.")
         return 1

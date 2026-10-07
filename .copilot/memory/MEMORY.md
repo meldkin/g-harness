@@ -103,6 +103,10 @@ High-signal context loaded at session start. Detailed history belongs in
   the provider/model catalog and `.env` key NAMES (never values), and runs a brief
   through the matching `*_delegate.py`. Loopback-only, per-run token, worker+model
   allowlist. Codex is wired too (`tools/codex_delegate.py`, read-only default).
+- [decision] dsh worker verified (2026-10-07): `tools/dsh_delegate.py` drives dsh
+  end to end; the setup prerequisites and the two bugs it surfaced (UTF-8 output,
+  and the `.env` base URL being wrong for dsh's messages protocol) are recorded
+  in `decisions-archive.md`.
 - [decision] Codex worker arm (2026-10-07): `tools/codex_delegate.py` runs Codex
   through `codex-env.ps1` with a read-only sandbox by default (`--allow-write` ->
   workspace-write; the dangerous flags are never emitted), writes the guardrail

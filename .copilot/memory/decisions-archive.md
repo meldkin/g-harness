@@ -629,3 +629,27 @@ Still open (pre-existing; its own task, not this change):
   flag; switch account with `/logout` then re-sign-in, check quota with `/usage`,
   and resume with `--conversation <id>` or `--continue-latest`. A Gemini API key
   (`modelProvider: "gemini"` + `GEMINI_API_KEY`) is the headless alternative.
+
+### dsh worker verified (2026-10-07)
+
+`tools/dsh_delegate.py` drives dsh end to end once the reference checkout is
+prepared:
+- `CI=true` -- `pnpm dsh` runs pnpm's dependency check, which aborts without a
+  TTY (`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`).
+- `pnpm build` -- packages are consumed from built output, so several report
+  "failed to import" until the workspace is built. `pnpm install` alone is not
+  enough (it reports "Already up to date").
+- `DSH_CLIENT_COMMIT_HASH=<7-hex>` -- the build script embeds a Git commit hash;
+  a checkout with no `.git` fails `git rev-parse HEAD`.
+
+Two fixes came out of the real run:
+- `UnicodeEncodeError`: dsh prints check marks ('✓') that the Windows console
+  (cp1252) cannot encode, which crashed the wrapper while printing an otherwise
+  fine run. stdout/stderr are now reconfigured to UTF-8 with replacement.
+- `HTTP_404 ... DeepSeek Messages`: the harness forwarded its `.env`
+  `DEEPSEEK_BASE_URL` (`https://api.deepseek.com/v1`, an OpenAI-compatible root),
+  but dsh's default protocol is `messages`, whose root is
+  `https://api.deepseek.com/anthropic`. The base URL is no longer taken from
+  `.env`; it passes through only from the process environment.
+
+Result: a real run returned the exact marker `DSH_E2E_OK` with exit 0.

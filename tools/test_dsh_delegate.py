@@ -240,3 +240,52 @@ def test_encoding_safe_reconfigures_both_streams(monkeypatch):
     monkeypatch.setattr(mod.sys, "stderr", Reconfigurable())
     mod._make_streams_encoding_safe()
     assert calls == [{"encoding": "utf-8", "errors": "replace"}] * 2
+
+
+# ── env forwarding (the base-URL 404 fix) ────────────────────────────────────
+
+
+def test_main_forward_api_key_from_env_file_but_not_its_base_url(monkeypatch, tmp_path):
+    mod = _load()
+    captured: dict = {}
+    monkeypatch.setattr(mod, "find_dsh_dir", lambda _explicit: tmp_path)
+    monkeypatch.setattr(mod, "dsh_script_declared", lambda _d: True)
+    monkeypatch.setattr(mod.shutil, "which", lambda _name: "pnpm")
+    monkeypatch.setattr(
+        mod,
+        "load_env_file",
+        lambda _p: {
+            "DEEPSEEK_API_KEY": "file-key",
+            "DEEPSEEK_BASE_URL": "https://api.deepseek.com/v1",
+        },
+    )
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_BASE_URL", raising=False)
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return (0, "ok", "")
+
+    monkeypatch.setattr(mod, "run_dsh", fake_run)
+    assert mod.main(["task"]) == 0
+    assert captured["env"]["DEEPSEEK_API_KEY"] == "file-key"
+    # the .env OpenAI-compatible root is NOT forwarded (it 404s dsh's messages protocol)
+    assert "DEEPSEEK_BASE_URL" not in captured["env"]
+
+
+def test_main_forwards_base_url_only_from_the_process_env(monkeypatch, tmp_path):
+    mod = _load()
+    captured: dict = {}
+    monkeypatch.setattr(mod, "find_dsh_dir", lambda _explicit: tmp_path)
+    monkeypatch.setattr(mod, "dsh_script_declared", lambda _d: True)
+    monkeypatch.setattr(mod.shutil, "which", lambda _name: "pnpm")
+    monkeypatch.setattr(mod, "load_env_file", lambda _p: {"DEEPSEEK_API_KEY": "k"})
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://example.test/anthropic")
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return (0, "", "")
+
+    monkeypatch.setattr(mod, "run_dsh", fake_run)
+    assert mod.main(["task"]) == 0
+    assert captured["env"]["DEEPSEEK_BASE_URL"] == "https://example.test/anthropic"
