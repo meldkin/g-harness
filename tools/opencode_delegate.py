@@ -73,6 +73,7 @@ Your permission scope was frozen when this task was created and cannot be expand
 
 # ── Helper Functions ─────────────────────────────────────────────────────────
 
+
 def _stderr(msg: str) -> None:
     """Print to stderr with [opencode_delegate] prefix."""
     print(f"[opencode_delegate] {msg}", file=sys.stderr)
@@ -193,7 +194,9 @@ def parse_json_events(output: str) -> dict[str, Any]:
             # Capture errors
             if event.get("type") == "error":
                 error_data = event.get("error", {})
-                result["error"] = error_data.get("data", {}).get("message", "Unknown error")
+                result["error"] = error_data.get("data", {}).get(
+                    "message", "Unknown error"
+                )
 
         except json.JSONDecodeError:
             # Skip non-JSON lines (banner, warnings)
@@ -208,17 +211,26 @@ def run_opencode_cli(
     directory: str,
     opencode_binary: str,
     timeout_s: int = 120,
+    *,
+    agent: str | None = None,
+    session: str | None = None,
 ) -> dict[str, Any]:
     """Run opencode CLI, return parsed JSON events."""
     cmd = [
         opencode_binary,
         "run",
         prompt,
-        "--model", model,
-        "--format", "json",
+        "--model",
+        model,
+        "--format",
+        "json",
         "--auto",  # auto-approve non-destructive permissions
         "--standalone",  # private server — do not touch the shared user server
     ]
+    if agent:  # e.g. the `jev` orchestrator agent
+        cmd += ["--agent", agent]
+    if session:  # continue (or create) a session, for a conversation
+        cmd += ["--session", session]
 
     _stderr(f"Running: opencode run ... --model {model} --format json --auto")
 
@@ -296,6 +308,7 @@ def log_usage(
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+
 def main(argv: list[str] | None = None) -> int:
     _make_streams_encoding_safe()
     parser = argparse.ArgumentParser(
@@ -337,6 +350,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=f"Use free model ({FREE_MODEL})",
     )
+    parser.add_argument(
+        "--agent", default=None, help="OpenCode agent to run (e.g. 'jev')"
+    )
+    parser.add_argument(
+        "--session", default=None, help="Session id to continue or create"
+    )
 
     args = parser.parse_args(argv)
 
@@ -366,6 +385,8 @@ def main(argv: list[str] | None = None) -> int:
         directory=args.directory,
         opencode_binary=opencode_binary,
         timeout_s=args.timeout,
+        agent=args.agent,
+        session=args.session,
     )
     elapsed = time.monotonic() - start
 

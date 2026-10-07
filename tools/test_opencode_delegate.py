@@ -35,7 +35,9 @@ def test_prefer_real_executable_ignores_retired_v1_package(tmp_path):
     v1.parent.mkdir(parents=True)
     v1.write_text("", encoding="utf-8")
 
-    assert opencode_delegate._prefer_real_executable(str(shim), platform="win32") == str(shim)
+    assert opencode_delegate._prefer_real_executable(
+        str(shim), platform="win32"
+    ) == str(shim)
 
 
 def test_prefer_real_executable_resolves_v2_npm_shim(tmp_path):
@@ -45,28 +47,36 @@ def test_prefer_real_executable_resolves_v2_npm_shim(tmp_path):
     real.parent.mkdir(parents=True)
     real.write_text("", encoding="utf-8")
 
-    assert opencode_delegate._prefer_real_executable(str(shim), platform="win32") == str(real)
+    assert opencode_delegate._prefer_real_executable(
+        str(shim), platform="win32"
+    ) == str(real)
 
 
 def test_prefer_real_executable_keeps_shim_without_wrapped_exe(tmp_path):
     shim = tmp_path / "opencode.cmd"
     shim.write_text("@echo off\n", encoding="utf-8")
 
-    assert opencode_delegate._prefer_real_executable(str(shim), platform="win32") == str(shim)
+    assert opencode_delegate._prefer_real_executable(
+        str(shim), platform="win32"
+    ) == str(shim)
 
 
 def test_prefer_real_executable_ignores_non_shim(tmp_path):
     exe = tmp_path / "opencode.exe"
     exe.write_text("", encoding="utf-8")
 
-    assert opencode_delegate._prefer_real_executable(str(exe), platform="win32") == str(exe)
+    assert opencode_delegate._prefer_real_executable(str(exe), platform="win32") == str(
+        exe
+    )
 
 
 def test_prefer_real_executable_noop_on_posix(tmp_path):
     shim = tmp_path / "opencode"
     shim.write_text("", encoding="utf-8")
 
-    assert opencode_delegate._prefer_real_executable(str(shim), platform="linux") == str(shim)
+    assert opencode_delegate._prefer_real_executable(
+        str(shim), platform="linux"
+    ) == str(shim)
 
 
 def test_parse_json_events_extracts_text_session_and_tokens():
@@ -91,3 +101,48 @@ def test_parse_json_events_captures_error():
     stream = '{"type":"error","error":{"data":{"message":"boom"}}}'
 
     assert opencode_delegate.parse_json_events(stream)["error"] == "boom"
+
+
+class _FakeProc:
+    returncode = 0
+    stdout = ""
+    stderr = ""
+
+
+def test_run_opencode_cli_passes_agent_and_session(monkeypatch, tmp_path):
+    captured: dict = {}
+
+    def fake_run(cmd, **_kwargs):
+        captured["cmd"] = cmd
+        return _FakeProc()
+
+    monkeypatch.setattr(opencode_delegate.subprocess, "run", fake_run)
+    opencode_delegate.run_opencode_cli(
+        prompt="do x",
+        model="commandcode/deepseek-v4.1-flash",
+        directory=str(tmp_path),
+        opencode_binary="opencode",
+        agent="jev",
+        session="ses_1",
+    )
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--agent") + 1] == "jev"
+    assert cmd[cmd.index("--session") + 1] == "ses_1"
+
+
+def test_run_opencode_cli_omits_agent_and_session_by_default(monkeypatch, tmp_path):
+    captured: dict = {}
+
+    def fake_run(cmd, **_kwargs):
+        captured["cmd"] = cmd
+        return _FakeProc()
+
+    monkeypatch.setattr(opencode_delegate.subprocess, "run", fake_run)
+    opencode_delegate.run_opencode_cli(
+        prompt="x",
+        model="m",
+        directory=str(tmp_path),
+        opencode_binary="opencode",
+    )
+    assert "--agent" not in captured["cmd"]
+    assert "--session" not in captured["cmd"]

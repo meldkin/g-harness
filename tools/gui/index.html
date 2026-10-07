@@ -73,6 +73,8 @@
       <label class="chip"><input type="checkbox" id="allow_write" style="width:auto"> codex: --allow-write (mặc định read-only)</label>
       <label class="chip"><input type="checkbox" id="stream" checked style="width:auto"> stream output (SSE)</label>
       <div style="flex:1"></div>
+      <label for="session" class="muted">session (JEV)</label>
+      <input id="session" type="text" placeholder="(mới mỗi lần)" style="width:160px">
       <label for="timeout" class="muted">timeout (s)</label>
       <input id="timeout" type="number" min="10" max="1800" value="300" style="width:90px">
     </div>
@@ -163,7 +165,7 @@ async function run() {
   const worker = $("worker").value;
   const model = $("model").value || null;
   const brief = $("brief").value;
-  const flags = { allow_tools: $("allow_tools").checked, free: $("free").checked, allow_write: $("allow_write").checked };
+  const flags = { allow_tools: $("allow_tools").checked, free: $("free").checked, allow_write: $("allow_write").checked, session: ($("session").value || "").trim() };
   const timeout = Number($("timeout").value) || 300;
   const body = JSON.stringify({ worker, model, brief, flags, timeout });
   const box = $("result"); box.textContent = "";

@@ -291,8 +291,8 @@ def test_stream_start_event_carries_run_id(server, monkeypatch):
     status, body = _call(
         port,
         "/api/run/stream",
-        token="tok123",
-        method="POST",  # noqa: S106 — test fixture
+        token="tok123",  # noqa: S106 — test fixture
+        method="POST",
         payload={"worker": "opencode", "brief": "x"},
     )
     assert status == 200
@@ -342,8 +342,8 @@ def test_executor_mode_endpoint_toggles(server, monkeypatch):
     status, body = _call(
         port,
         "/api/executor-mode",
-        token="tok123",
-        method="POST",  # noqa: S106 — test fixture
+        token="tok123",  # noqa: S106 — test fixture
+        method="POST",
         payload={"on": True},
     )
     assert status == 200
@@ -375,9 +375,42 @@ def test_stop_endpoint_unknown_run(server):
     status, body = _call(
         port,
         "/api/stop",
-        token="tok123",
-        method="POST",  # noqa: S106 — test fixture
+        token="tok123",  # noqa: S106 — test fixture
+        method="POST",
         payload={"run_id": "nope"},
     )
     assert status == 200
     assert json.loads(body)["stopped"] == 0
+
+
+# ── JEV agent worker ─────────────────────────────────────────────────────────
+
+
+def test_build_argv_jev_adds_agent_and_session():
+    mod = _load()
+    assert mod.build_argv("jev", "b", None, {}) == [
+        sys.executable,
+        "tools/opencode_delegate.py",
+        "b",
+        "--agent",
+        "jev",
+    ]
+    assert mod.build_argv("jev", "b", "m", {"session": "ses_1"}) == [
+        sys.executable,
+        "tools/opencode_delegate.py",
+        "b",
+        "--agent",
+        "jev",
+        "--model",
+        "m",
+        "--session",
+        "ses_1",
+    ]
+
+
+def test_workers_includes_the_jev_agent(monkeypatch):
+    mod = _load()
+    monkeypatch.setattr(mod.shutil, "which", lambda name: f"/usr/bin/{name}")
+    by_id = {w["id"]: w for w in mod.workers()}
+    assert by_id["jev"]["ready"] is True
+    assert by_id["jev"]["cli"] == "opencode"
