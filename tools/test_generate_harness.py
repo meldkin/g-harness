@@ -295,7 +295,10 @@ def test_generated_opencode_json_gates_disabled_skills(tmp_path):
     opencode_engine.generate_opencode_json(tmp_path / ".opencode", tmp_path, disabled)
 
     data = json.loads((tmp_path / "opencode.json").read_text(encoding="utf-8"))
-    assert data["default_agent"] == "solo-code-engineer"
+    # `jev` orchestrates and can spawn solo-code-engineer via its `task:` block, so
+    # the orchestrator is the default and the executor stays reachable.
+    assert data["default_agent"] == "jev"
+    assert data["agents"]["jev"]["model"] == data["model"]
     # Legacy `permission` object (Kilo's bundled OpenCode v1 rejects `permissions`).
     assert "permissions" not in data
     # v2-only `providers` is split out of the root file into .opencode/.

@@ -652,8 +652,8 @@ def generate_opencode_json(
         "$schema": "https://opencode.ai/config.json",
         "model": _DEFAULT_MODEL,
         "small_model": _SMALL_MODEL,
-        "default_agent": "solo-code-engineer",
-        "agents": {"solo-code-engineer": {"model": _DEFAULT_MODEL}},
+        "default_agent": "jev",
+        "agents": {"jev": {"model": _DEFAULT_MODEL}},
         "permission": permission,
     }
     local_config: dict[str, Any] = {
