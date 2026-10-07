@@ -86,6 +86,16 @@ def run_cli(
     return result
 
 
+def run_cli_or_skip(
+    cli_path: Path, task: str, **kwargs: Any
+) -> subprocess.CompletedProcess[str]:
+    """run_cli, but a transport timeout skips the test like an absent key does."""
+    try:
+        return run_cli(cli_path, task, **kwargs)
+    except subprocess.TimeoutExpired:
+        pytest.skip(f"{cli_path.name} timed out")
+
+
 def parse_opencode_output(stdout: str) -> dict[str, Any]:
     """
     Parse OpenCode CLI output looking for JSON response blocks.
@@ -170,15 +180,12 @@ def test_opencode_echo_task():
     - Model responds (non-empty output)
     - Token usage is reported
     """
-    try:
-        result = run_cli(
-            OPENCODE_CLI,
-            "Echo the exact text: E2E_TEST_MARKER",
-            free=True,
-            timeout=60,
-        )
-    except subprocess.TimeoutExpired:
-        pytest.skip("OpenCode CLI timed out")
+    result = run_cli_or_skip(
+        OPENCODE_CLI,
+        "Echo the exact text: E2E_TEST_MARKER",
+        free=True,
+        timeout=60,
+    )
 
     assert result.returncode == 0, f"OpenCode CLI failed:\n{result.stderr}"
 
@@ -216,16 +223,13 @@ def test_opencode_file_write_world_verification():
         target_file = tmppath / "e2e_proof.txt"
         marker = "OPENCODE_E2E_SUCCESS"
 
-        try:
-            result = run_cli(
-                OPENCODE_CLI,
-                f'Write the exact text "{marker}" to file: {target_file}',
-                free=True,
-                timeout=90,
-                cwd=tmppath,
-            )
-        except subprocess.TimeoutExpired:
-            pytest.skip("OpenCode CLI timed out")
+        result = run_cli_or_skip(
+            OPENCODE_CLI,
+            f'Write the exact text "{marker}" to file: {target_file}',
+            free=True,
+            timeout=90,
+            cwd=tmppath,
+        )
 
         # Check CLI execution (allow model errors, verify world instead)
         if result.returncode != 0:
@@ -251,14 +255,11 @@ def test_kilo_cli_echo_task():
     - CLI executes without error
     - Model responds (non-empty output)
     """
-    try:
-        result = run_cli(
-            KILO_CLI,
-            "Echo the exact text: E2E_KILO_MARKER",
-            timeout=60,
-        )
-    except subprocess.TimeoutExpired:
-        pytest.skip("Kilo CLI timed out")
+    result = run_cli_or_skip(
+        KILO_CLI,
+        "Echo the exact text: E2E_KILO_MARKER",
+        timeout=60,
+    )
 
     # Kilo CLI may have different error patterns, be lenient
     if result.returncode != 0:
@@ -269,6 +270,21 @@ def test_kilo_cli_echo_task():
     assert "e2e_kilo_marker" in output, (
         f"Model did not echo marker. Output: {result.stdout[:500]}"
     )
+
+
+def test_run_cli_or_skip_returns_the_result(monkeypatch):
+    sentinel = object()
+    monkeypatch.setattr(sys.modules[__name__], "run_cli", lambda *_a, **_k: sentinel)
+    assert run_cli_or_skip(OPENCODE_CLI, "task") is sentinel
+
+
+def test_run_cli_or_skip_turns_a_timeout_into_a_skip(monkeypatch):
+    def boom(*_a, **_k):
+        raise subprocess.TimeoutExpired(cmd="x", timeout=1)
+
+    monkeypatch.setattr(sys.modules[__name__], "run_cli", boom)
+    with pytest.raises(pytest.skip.Exception):
+        run_cli_or_skip(OPENCODE_CLI, "task")
 
 
 # ── Self-Test (framework validation) ─────────────────────────────────────────
