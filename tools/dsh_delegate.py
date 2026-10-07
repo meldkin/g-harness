@@ -28,6 +28,13 @@ Headless note (all found on a real run):
     entry runs from source (`node --import tsx/esm apps/cli/src/bin.ts`), but the
     workspace packages are consumed from their built output, so several report
     "failed to import" until `pnpm build` has been run once in the checkout.
+  - `pnpm build` needs a Git commit hash for browser build metadata; a checkout
+    with no `.git` fails `git rev-parse HEAD`, so export
+    `DSH_CLIENT_COMMIT_HASH=<7-hex>` for that run.
+  - after all that the run reaches the model. `HTTP_404 ... DeepSeek Messages`
+    means the `headless` profile's protocol does not match this project's
+    `DEEPSEEK_BASE_URL` (the .env value is the OpenAI-compatible `/v1` host) --
+    a profile/config matter on the dsh side, not this wrapper.
 """
 
 from __future__ import annotations
