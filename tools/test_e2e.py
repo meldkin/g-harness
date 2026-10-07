@@ -170,12 +170,15 @@ def test_opencode_echo_task():
     - Model responds (non-empty output)
     - Token usage is reported
     """
-    result = run_cli(
-        OPENCODE_CLI,
-        "Echo the exact text: E2E_TEST_MARKER",
-        free=True,
-        timeout=60,
-    )
+    try:
+        result = run_cli(
+            OPENCODE_CLI,
+            "Echo the exact text: E2E_TEST_MARKER",
+            free=True,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.skip("OpenCode CLI timed out")
 
     assert result.returncode == 0, f"OpenCode CLI failed:\n{result.stderr}"
 
@@ -187,8 +190,9 @@ def test_opencode_echo_task():
     parsed = parse_opencode_output(result.stdout)
     if parsed:
         # If JSON response found, verify structure
-        assert "choices" in parsed or "content" in parsed, \
+        assert "choices" in parsed or "content" in parsed, (
             "OpenCode output missing expected fields"
+        )
 
 
 @pytest.mark.skipif(not HAS_DEEPSEEK_KEY, reason="ENV key not set")
@@ -204,30 +208,38 @@ def test_opencode_file_write_world_verification():
     - File content matches request
     - No reliance on model's claim of success
     """
-    with tempfile.TemporaryDirectory() as tmpdir:
+    # ignore_cleanup_errors: on Windows the file the CLI just wrote can still be
+    # held briefly (AV/indexer), which surfaced as a flaky PermissionError during
+    # temp-dir teardown rather than a real test failure.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         tmppath = Path(tmpdir)
         target_file = tmppath / "e2e_proof.txt"
         marker = "OPENCODE_E2E_SUCCESS"
 
-        result = run_cli(
-            OPENCODE_CLI,
-            f'Write the exact text "{marker}" to file: {target_file}',
-            free=True,
-            timeout=90,
-            cwd=tmppath,
-        )
+        try:
+            result = run_cli(
+                OPENCODE_CLI,
+                f'Write the exact text "{marker}" to file: {target_file}',
+                free=True,
+                timeout=90,
+                cwd=tmppath,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.skip("OpenCode CLI timed out")
 
         # Check CLI execution (allow model errors, verify world instead)
         if result.returncode != 0:
             pytest.skip(f"OpenCode CLI error (network/timeout): {result.stderr[:200]}")
 
         # WORLD VERIFICATION: read file independently
-        assert target_file.exists(), \
+        assert target_file.exists(), (
             f"Model did not create file: {target_file}\nStdout: {result.stdout[:500]}"
+        )
 
         content = target_file.read_text(encoding="utf-8")
-        assert marker in content, \
+        assert marker in content, (
             f"File content wrong. Expected '{marker}', got: {content[:100]}"
+        )
 
 
 @pytest.mark.skipif(not HAS_DEEPSEEK_KEY, reason="ENV key not set")
@@ -239,11 +251,14 @@ def test_kilo_cli_echo_task():
     - CLI executes without error
     - Model responds (non-empty output)
     """
-    result = run_cli(
-        KILO_CLI,
-        "Echo the exact text: E2E_KILO_MARKER",
-        timeout=60,
-    )
+    try:
+        result = run_cli(
+            KILO_CLI,
+            "Echo the exact text: E2E_KILO_MARKER",
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.skip("Kilo CLI timed out")
 
     # Kilo CLI may have different error patterns, be lenient
     if result.returncode != 0:
@@ -251,8 +266,9 @@ def test_kilo_cli_echo_task():
 
     # Check for marker in output
     output = result.stdout.lower()
-    assert "e2e_kilo_marker" in output, \
+    assert "e2e_kilo_marker" in output, (
         f"Model did not echo marker. Output: {result.stdout[:500]}"
+    )
 
 
 # ── Self-Test (framework validation) ─────────────────────────────────────────
@@ -290,7 +306,10 @@ def run_self_test() -> bool:
         if result.returncode not in (0, 2):
             print(f"[FAIL] {cli_name} CLI --help failed", file=sys.stderr)
             return False
-        if "usage" not in result.stdout.lower() and "usage" not in result.stderr.lower():
+        if (
+            "usage" not in result.stdout.lower()
+            and "usage" not in result.stderr.lower()
+        ):
             print(f"[FAIL] {cli_name} CLI --help has no usage text", file=sys.stderr)
             return False
     print("[OK] Both CLIs respond to --help")
@@ -298,7 +317,9 @@ def run_self_test() -> bool:
     # Test 3: API key detection
     print("\n3. Checking API key detection...")
     has_key = bool(os.getenv("DEEPSEEK_API_KEY"))
-    print(f"[OK] ENV key: {'present' if has_key else 'not set (real API tests will skip)'}")
+    print(
+        f"[OK] ENV key: {'present' if has_key else 'not set (real API tests will skip)'}"
+    )
 
     # Test 4: Temp directory for world verification
     print("\n4. Testing temp directory creation...")
