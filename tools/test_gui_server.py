@@ -239,3 +239,45 @@ def test_run_ok_with_mocked_runner(server, monkeypatch):
     )
     assert status == 200
     assert json.loads(body)["stdout"] == "ok"
+
+
+# ── streaming (SSE) ──────────────────────────────────────────────────────────
+
+
+def test_sse_framing():
+    mod = _load()
+    assert (
+        mod._sse("chunk", {"line": "hi"}) == b'event: chunk\ndata: {"line": "hi"}\n\n'
+    )
+
+
+def test_stream_endpoint_requires_token(server):
+    _, port = server
+    status, _ = _call(
+        port,
+        "/api/run/stream",
+        method="POST",
+        payload={"worker": "opencode", "brief": "x"},
+    )
+    assert status == 403
+
+
+def test_stream_endpoint_streams_output(server, monkeypatch):
+    mod, port = server
+    monkeypatch.setattr(
+        mod,
+        "_stream_argv",
+        lambda _w, _b, _m, _f: [sys.executable, "-c", "print('hello-stream')"],
+    )
+    status, body = _call(
+        port,
+        "/api/run/stream",
+        token="tok123",  # noqa: S106 — test fixture
+        method="POST",  # noqa: S106 — test fixture
+        payload={"worker": "opencode", "brief": "x"},
+    )
+    assert status == 200
+    assert "event: start" in body
+    assert "hello-stream" in body  # the child's stdout reached the stream
+    assert "event: done" in body
+    assert '"stop": "completed"' in body

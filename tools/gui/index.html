@@ -71,6 +71,7 @@
       <label class="chip"><input type="checkbox" id="allow_tools" style="width:auto"> gemini: --allow-tools</label>
       <label class="chip"><input type="checkbox" id="free" style="width:auto"> opencode: --free</label>
       <label class="chip"><input type="checkbox" id="allow_write" style="width:auto"> codex: --allow-write (mặc định read-only)</label>
+      <label class="chip"><input type="checkbox" id="stream" checked style="width:auto"> stream output (SSE)</label>
       <div style="flex:1"></div>
       <label for="timeout" class="muted">timeout (s)</label>
       <input id="timeout" type="number" min="10" max="1800" value="300" style="width:90px">
@@ -153,28 +154,61 @@ async function run() {
   const model = $("model").value || null;
   const brief = $("brief").value;
   const flags = { allow_tools: $("allow_tools").checked, free: $("free").checked, allow_write: $("allow_write").checked };
+  const timeout = Number($("timeout").value) || 300;
+  const body = JSON.stringify({ worker, model, brief, flags, timeout });
+  const box = $("result"); box.textContent = "";
   $("status").textContent = "đang chạy…";
-  $("result").textContent = "";
   const t0 = Date.now();
+  const pane = (title) => {
+    const h = document.createElement("div"); h.className = "muted"; h.textContent = title; h.style.marginTop = "8px";
+    const p = document.createElement("pre"); box.append(h, p); return p;
+  };
+
+  if ($("stream").checked) {
+    const outPre = pane("stdout (live)");
+    const metaPre = pane("argv / exit / changes");
+    const res = await fetch("/api/run/stream", {
+      method: "POST", headers: { "X-Token": TOKEN, "Content-Type": "application/json" }, body
+    });
+    if (!res.ok) { $("status").textContent = "lỗi " + res.status; return; }
+    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const frame = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        const ev = (frame.match(/^event: (.*)$/m) || [])[1];
+        const dl = (frame.match(/^data: (.*)$/m) || [])[1];
+        if (!ev || dl === undefined) continue;
+        const data = JSON.parse(dl);
+        if (ev === "chunk") { outPre.textContent += data.line + "\n"; outPre.scrollTop = outPre.scrollHeight; }
+        else if (ev === "start") { metaPre.textContent = JSON.stringify(data.argv); }
+        else if (ev === "error") { $("status").textContent = "lỗi: " + data.error; }
+        else if (ev === "done") {
+          metaPre.textContent += "\nexit=" + data.exit + "  stop=" + data.stop + "\n" + JSON.stringify(data.changes);
+          $("status").textContent = "xong sau " + ((Date.now() - t0) / 1000).toFixed(1) + "s";
+        }
+      }
+    }
+    return;
+  }
+
   const r = await api("/api/run", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ worker, model, brief, flags, timeout: Number($("timeout").value) || 300 })
+    method: "POST", headers: { "Content-Type": "application/json" }, body
   });
   $("status").textContent = r.ok ? ("xong sau " + ((Date.now() - t0) / 1000).toFixed(1) + "s")
                                  : ("lỗi: " + (r.body.error || r.status));
   if (!r.ok) return;
   const out = r.body;
-  const box = $("result");
-  const mk = (title, text, cls) => {
-    const h = document.createElement("div"); h.className = "muted"; h.textContent = title; h.style.marginTop = "8px";
-    const p = document.createElement("pre"); if (cls) p.className = cls; p.textContent = esc(text);
-    box.append(h, p);
+  const put = (title, text, cls) => {
+    const p = pane(title); if (cls) p.className = cls; p.textContent = esc(text);
   };
-  mk("argv", JSON.stringify(out.argv));
-  mk("exit code", String(out.returncode));
-  mk("stdout", out.stdout || "(rỗng)");
-  mk("stderr", out.stderr || "(rỗng)", out.returncode === 0 ? "" : "bad");
+  put("argv", JSON.stringify(out.argv));
+  put("exit code", String(out.returncode));
+  put("stdout", out.stdout || "(rỗng)");
+  put("stderr", out.stderr || "(rỗng)", out.returncode === 0 ? "" : "bad");
 }
 
 $("run").addEventListener("click", run);

@@ -26,11 +26,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import queue
 import re
 import secrets
 import shutil
 import subprocess  # noqa: S404 — fixed argv, allowlisted worker + model
 import sys
+import threading
+import time
+from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -197,6 +201,93 @@ def run_task(
     }
 
 
+def change_summary(root: Path = ROOT) -> dict[str, str]:
+    """Post-run `git status` / `git diff --stat`, so any write is visible."""
+
+    def _git(*args: str) -> str:
+        try:
+            proc = subprocess.run(  # noqa: S603 — fixed argv (git + constants)
+                ["git", "-C", str(root), *args],  # noqa: S607 — fixed argv
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        return proc.stdout.strip()
+
+    return {"status": _git("status", "--porcelain"), "diffstat": _git("diff", "--stat")}
+
+
+def _sse(event: str, data: Any) -> bytes:
+    """Frame one Server-Sent Event. Pure — tested directly."""
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n".encode()
+
+
+# Indirection so tests can stream a trivial command instead of a real worker.
+_stream_argv = build_argv
+
+
+def stream_task(argv: list[str], timeout_s: int) -> Iterator[tuple[str, Any]]:
+    """Yield (event, data) frames while running argv, merging stderr into stdout.
+
+    Events: ``start`` (the argv), ``chunk`` (one output line), ``error`` (launch
+    failure) and ``done`` (exit code, stop reason, post-run change summary).
+    """
+    yield ("start", {"argv": argv})
+    try:
+        proc = subprocess.Popen(  # noqa: S603 — fixed argv, allowlisted worker
+            argv,
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except OSError as exc:
+        yield ("error", {"error": str(exc)})
+        return
+    lines: queue.Queue[str | None] = queue.Queue()
+
+    def _reader() -> None:
+        try:
+            for line in proc.stdout or []:
+                lines.put(line)
+        finally:
+            lines.put(None)
+
+    threading.Thread(target=_reader, daemon=True).start()
+    deadline = time.monotonic() + timeout_s
+    timed_out = False
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+            proc.kill()
+            break
+        try:
+            item = lines.get(timeout=min(remaining, 1.0))
+        except queue.Empty:
+            if proc.poll() is not None and lines.empty():
+                break
+            continue
+        if item is None:
+            break
+        yield ("chunk", {"line": item.rstrip("\n")})
+    code = proc.wait()
+    yield (
+        "done",
+        {
+            "exit": None if timed_out else code,
+            "stop": "timeout" if timed_out else "completed",
+            "changes": change_summary(),
+        },
+    )
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "jevy-gui/1.0"
     token: str = ""
@@ -249,20 +340,14 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, "text/plain; charset=utf-8", b"not found")
 
     def do_POST(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler API
-        if self.path != "/api/run":
+        if self.path not in ("/api/run", "/api/run/stream"):
             self._send(404, "text/plain; charset=utf-8", b"not found")
             return
         if not self._authorized():
             self._json({"error": "forbidden"}, 403)
             return
-        length = int(self.headers.get("Content-Length", "0") or "0")
-        if length <= 0 or length > MAX_BODY:
-            self._json({"error": "bad body size"}, 400)
-            return
-        try:
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            self._json({"error": "invalid JSON"}, 400)
+        payload = self._read_payload()
+        if payload is None:
             return
 
         catalog = providers()
@@ -282,7 +367,42 @@ class Handler(BaseHTTPRequestHandler):
             payload.get("timeout", self.timeout_default) or self.timeout_default
         )
         timeout_s = max(10, min(timeout_s, 1800))
-        self._json(run_task(worker, brief, model, flags, timeout_s))
+        if self.path == "/api/run/stream":
+            self._stream(worker, brief, model, flags, timeout_s)
+        else:
+            self._json(run_task(worker, brief, model, flags, timeout_s))
+
+    def _read_payload(self) -> dict[str, Any] | None:
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        if length <= 0 or length > MAX_BODY:
+            self._json({"error": "bad body size"}, 400)
+            return None
+        try:
+            return json.loads(self.rfile.read(length).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._json({"error": "invalid JSON"}, 400)
+            return None
+
+    def _stream(
+        self,
+        worker: str,
+        brief: str,
+        model: str | None,
+        flags: dict[str, Any],
+        timeout_s: int,
+    ) -> None:
+        argv = _stream_argv(worker, brief, model, flags)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        try:
+            for event, data in stream_task(argv, timeout_s):
+                self.wfile.write(_sse(event, data))
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # the browser went away; the worker keeps running to completion
 
 
 def build_server(
