@@ -57,7 +57,7 @@ const BLOCK_PATTERNS = [
   { name: 'rm_root', pattern: new RegExp(RM_CMD + RM_FLAGS + ROOT_PATH + '(?:\\s|$|\\*|"|\')') },
   // A root target that is not the first argument: `rm -rf build /`.
   { name: 'rm_root_after_other_target', pattern: new RegExp(RM_CMD + RM_FLAGS + '[^&|;\\n]*\\s+' + ROOT_PATH + '(?:\\s|$|\\*|"|\')') },
-  { name: 'rm_flags_after_target', pattern: new RegExp(RM_CMD + TARGET_PATH + '\\s+' + RM_FLAGS) },
+  { name: 'rm_flags_after_target', pattern: new RegExp(RM_CMD + '(?:[-\\w]+\\s+)*' + TARGET_PATH + '\\s+(?:[-\\w]+\\s+)*' + RM_FLAGS) },
   { name: 'rm_home', pattern: new RegExp(RM_CMD + RM_FLAGS + '~') },
   { name: 'rm_wildcard', pattern: new RegExp(RM_CMD + RM_FLAGS + '\\*') },
   { name: 'rm_relative_wildcard', pattern: new RegExp(RM_CMD + RM_FLAGS + '\\./(?:\\s|$|\\*)') },
@@ -108,7 +108,7 @@ const BLOCK_PATTERNS = [
   // while a wrapped one is caught and the engines agree. Covers piping into a
   // shell (sh/bash/zsh/ksh, with or without sudo) and into an interpreter that
   // executes the payload (python, perl, ruby, node, pwsh, iex).
-  { name: 'curl_pipe_shell', pattern: /(?:^|[;&|]\s*)(?:curl|wget)\s+[^|&;\n]*\|\s*(?:sudo\s+)?(?:(?:ba|z|k)?sh\b|python[0-9.]*\b|perl\b|ruby\b|node\b|pwsh\b|powershell\b|iex\b)/ },
+  { name: 'curl_pipe_shell', pattern: /(?:^|[;&|]\s*)(?:curl|wget)\s+[^|&;\n]*\|\s*(?:(?:sudo|env)\s+(?:\w+=\S*\s+)*)?(?:(?:ba|z|k)?sh\b|python[0-9.]*\b|perl\b|ruby\b|node\b|pwsh\b|powershell\b|iex\b)/ },
   // The PowerShell download-and-execute idiom (`irm <url> | iex`), which runs
   // whatever the URL returns with no file on disk. Anchored to command position
   // so `rg 'irm x | iex'` is not blocked. Piping to Out-File is a different,
@@ -119,9 +119,9 @@ const BLOCK_PATTERNS = [
   { name: 'win_rd_recursive', pattern: /(?:rd|rmdir)\s+(?:.*\s)?\/s\b/i },
   { name: 'win_del_any', pattern: /del\s+(?:.*\s)?\/[qsf]\b/i },
   { name: 'win_remove_recursive', pattern: /Remove-Item\s+.*-Recurse.*-Force/i },
-  { name: 'win_format_volume', pattern: /\bFormat-Volume\b/ },
-  { name: 'win_stop_computer', pattern: /\bStop-Computer\b/ },
-  { name: 'win_restart_computer', pattern: /\bRestart-Computer\b/ },
+  { name: 'win_format_volume', pattern: /(?:^|[;&|]\s*)Format-Volume\b/i },
+  { name: 'win_stop_computer', pattern: /(?:^|[;&|]\s*)Stop-Computer\b/i },
+  { name: 'win_restart_computer', pattern: /(?:^|[;&|]\s*)Restart-Computer\b/i },
   // Windows disk/registry/shadow-copy destruction the port never carried over.
   // Anchored to command position like format_disk, so `rg 'reg delete'` is not
   // blocked while Get-Disk / `reg query` / `vssadmin list shadows` stay allowed.
@@ -135,8 +135,8 @@ const BLOCK_PATTERNS = [
   // `--output-format json`, so the guard blocked ruff and grep -- and a guard
   // that blocks routine tooling teaches people to work around it.
   { name: 'format_disk', pattern: /(?:^|[;&|]\s*)format\s+(?:\/\S+\s+)*[a-zA-Z]:/i },
-  { name: 'diskpart', pattern: /\bdiskpart\b/ },
-  { name: 'shutdown_system', pattern: /(?:shutdown|reboot|halt)\b/ },
+  { name: 'diskpart', pattern: /(?:^|[;&|]\s*)diskpart\b/ },
+  { name: 'shutdown_system', pattern: /(?:^|[;&|]\s*)(?:shutdown|reboot|halt)\b/ },
 ];
 
 // ─── WARN PATTERNS ─────────────────────────────────────────────────────────
@@ -231,6 +231,7 @@ function normalizeCommand(command) {
     cmd = cmd.replace(/^sudo\s+/, '');
     cmd = cmd.replace(/^env(?:\s+\w+=[^\s]*)+\s+/, '');
     cmd = cmd.replace(/^(?:bash|sh)\s+-c\s+/, '');
+    cmd = cmd.replace(/^(?:nohup|nice|command|time)\s+/, '');
     cmd = cmd.replace(/^(['"])(.*)\1$/, '$2');
     if (cmd === prev) break;
   }

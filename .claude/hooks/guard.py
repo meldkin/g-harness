@@ -73,7 +73,15 @@ BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
     # The same wipe with the flags after the target: `rm / -rf`. Each flags-first
     # pattern above needs the flags before its path, so none of them saw this.
-    ("rm_flags_after_target", re.compile(rf"{_RM_CMD}{_TARGET_PATH}\s+{_RM_FLAGS}")),
+    # Benign options may sit on either side of the target and before the
+    # destructive flags (`rm -v / -rf`, `rm build / -rf`); the flags still have to
+    # be of the r/R/f/F kind, so `rm / -v` (benign only) stays allowed.
+    (
+        "rm_flags_after_target",
+        re.compile(
+            rf"{_RM_CMD}(?:[-\w]+\s+)*{_TARGET_PATH}\s+(?:[-\w]+\s+)*{_RM_FLAGS}"
+        ),
+    ),
     ("rm_home", re.compile(rf"{_RM_CMD}{_RM_FLAGS}~")),
     ("rm_wildcard", re.compile(rf"{_RM_CMD}{_RM_FLAGS}\*")),
     (
@@ -147,8 +155,10 @@ BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     # `--output-format json`, so the guard blocked ruff and grep -- and a guard
     # that blocks routine tooling teaches people to work around it.
     ("format_disk", re.compile(r"(?:^|[;&|]\s*)format\s+(?:/\S+\s+)*[a-zA-Z]:", re.I)),
-    ("diskpart", re.compile(r"\bdiskpart\b")),
-    ("shutdown_system", re.compile(r"(?:shutdown|reboot|halt)\b")),
+    # Anchored to command position: a search or commit message that merely NAMES
+    # the command (`rg 'diskpart'`, `rg 'shutdown'`) must not be blocked.
+    ("diskpart", re.compile(r"(?:^|[;&|]\s*)diskpart\b")),
+    ("shutdown_system", re.compile(r"(?:^|[;&|]\s*)(?:shutdown|reboot|halt)\b")),
     # `./` itself is the target to block (a recursive wipe of the current
     # directory), not any path that merely starts with `.` -- `rm -rf ./build` is
     # routine and was being caught. The trailing boundary keeps `rm -rf ./`
@@ -186,7 +196,7 @@ BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "curl_pipe_shell",
         re.compile(
-            r"(?:^|[;&|]\s*)(?:curl|wget)\s+[^|&;\n]*\|\s*(?:sudo\s+)?(?:(?:ba|z|k)?sh\b|python[0-9.]*\b|perl\b|ruby\b|node\b|pwsh\b|powershell\b|iex\b)"
+            r"(?:^|[;&|]\s*)(?:curl|wget)\s+[^|&;\n]*\|\s*(?:(?:sudo|env)\s+(?:\w+=\S*\s+)*)?(?:(?:ba|z|k)?sh\b|python[0-9.]*\b|perl\b|ruby\b|node\b|pwsh\b|powershell\b|iex\b)"
         ),
     ),
     # The PowerShell download-and-execute idiom. curl_pipe_shell only knew the
@@ -216,9 +226,9 @@ BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("del_temp_win", re.compile(r"del\s+(?:/f\s+)?/[qs]\s+\$?(?:env:)?TEMP\b", re.I)),
     ("win_rd_recursive", re.compile(r"(?:rd|rmdir)\s+(?:.*\s)?/s\b", re.I)),
     ("win_del_any", re.compile(r"del\s+(?:.*\s)?/[qsf]\b", re.I)),
-    ("win_format_volume", re.compile(r"\bFormat-Volume\b")),
-    ("win_stop_computer", re.compile(r"\bStop-Computer\b")),
-    ("win_restart_computer", re.compile(r"\bRestart-Computer\b")),
+    ("win_format_volume", re.compile(r"(?:^|[;&|]\s*)Format-Volume\b", re.I)),
+    ("win_stop_computer", re.compile(r"(?:^|[;&|]\s*)Stop-Computer\b", re.I)),
+    ("win_restart_computer", re.compile(r"(?:^|[;&|]\s*)Restart-Computer\b", re.I)),
     # Windows disk/registry/shadow-copy destruction the port never carried over.
     # Anchored to command position like format_disk, so a search that only NAMES
     # the cmdlet -- `rg 'reg delete'` -- is not blocked, while each destructive
@@ -382,6 +392,7 @@ def normalize_command(command: str) -> str:
         cmd = re.sub(r"^sudo\s+", "", cmd)
         cmd = re.sub(r"^env(\s+\w+=[^\s]*)+\s+", "", cmd)
         cmd = re.sub(r"^(?:bash|sh)\s+-c\s+", "", cmd)
+        cmd = re.sub(r"^(?:nohup|nice|command|time)\s+", "", cmd)
         cmd = re.sub(r"^(['\"])(.*)\1$", r"\2", cmd)
         if cmd == prev:
             break
