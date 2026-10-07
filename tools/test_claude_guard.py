@@ -11,8 +11,10 @@ Usage:
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -101,6 +103,11 @@ BLOCKED_COMMANDS = [
     # this the two engines disagreed on `sudo rm -rf ~`.
     "sudo rm -rf ~",
     "env FOO=1 rm -rf /",
+    # These two had dedicated patterns (rm_r_wildcard, rm_r_f_wildcard) that
+    # rm_wildcard now subsumes, since _RM_FLAGS requires at least one flag. Pinned
+    # here so removing the dedicated patterns cannot silently drop the coverage.
+    "rm -r *",
+    "rm -r -f *",
 ]
 
 
@@ -183,6 +190,43 @@ def test_safe_commands_allowed(command):
 # agree, verdict for verdict.
 
 GATE_GUARD_JS = ROOT / ".kilo" / "hooks" / "pre-tool-use" / "gate-guard.js"
+
+
+def _python_block_pattern_names() -> set[str]:
+    """Pattern names defined in guard.py, loaded by path (it is not a module)."""
+    spec = importlib.util.spec_from_file_location("guard_under_test", GUARD)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return {name for name, _pattern in module.BLOCK_PATTERNS}
+
+
+def _js_block_pattern_names() -> set[str]:
+    """Pattern names defined in gate-guard.js, read as text."""
+    text = GATE_GUARD_JS.read_text(encoding="utf-8")
+    block = text.split("const BLOCK_PATTERNS", 1)[1].split("\n];", 1)[0]
+    return set(re.findall(r"\{ name: '([A-Za-z0-9_]+)'", block))
+
+
+def test_both_engines_define_the_same_block_patterns():
+    """Name-set parity, as a complement to the behavioural corpus.
+
+    A name comparison alone is insufficient -- identical names can carry divergent
+    regexes, which is what test_guard_engines_agree catches. It is still needed,
+    because behaviour parity cannot see a pattern that exists in one engine and is
+    never exercised by the corpus. The non-empty assertions stop a broken loader
+    from turning this into a pass, the failure mode the oracle diff script hit.
+    """
+    python_names = _python_block_pattern_names()
+    js_names = _js_block_pattern_names()
+
+    assert python_names, "guard.py defines no BLOCK_PATTERNS -- the loader broke"
+    assert js_names, "parsed no names from gate-guard.js -- the parser broke"
+    assert python_names == js_names, (
+        f"only in guard.py: {sorted(python_names - js_names)}; "
+        f"only in gate-guard.js: {sorted(js_names - python_names)}"
+    )
+
 
 PARITY_CORPUS: list[tuple[str, bool]] = [
     *[(command, True) for command in BLOCKED_COMMANDS],

@@ -81,8 +81,6 @@ BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("diskpart", re.compile(r"\bdiskpart\b")),
     ("shutdown_system", re.compile(r"(?:shutdown|reboot|halt)\b")),
     ("rm_relative_wildcard", re.compile(rf"{_RM_CMD}{_RM_FLAGS}\./")),
-    ("rm_r_wildcard", re.compile(r"rm\s+-r\s+\*")),
-    ("rm_r_f_wildcard", re.compile(r"rm\s+-r\s+-f\s+\*")),
     ("git_clean_force", re.compile(r"git\s+clean\s+-f")),
     ("rm_system_dir", re.compile(rf"{_RM_CMD}{_RM_FLAGS}{_ROOT_PATH}(?:etc|usr|var|bin|lib(?:64)?|boot|sbin|opt|root|sys|proc|dev)(?:/|\s|$)")),
     ("curl_pipe_shell", re.compile(r"(?:curl|wget)\s+.*\|\s*(?:ba)?sh\b")),
