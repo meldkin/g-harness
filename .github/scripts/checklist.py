@@ -64,6 +64,26 @@ def print_error(text: str):
     print(f"{Colors.RED}[{SYM_BAD}] {text}{Colors.ENDC}")
 
 
+def coverage_ratchet_check(project_path: Path) -> dict | None:
+    """Run the coverage ratchet when the project has opted into one.
+
+    Returns the run_check result, or None when the project carries no budget
+    file -- a project that never opted in is not failed by this gate. Extracted
+    from the P2 block so both branches are unit-testable without executing the
+    real ratchet (which runs the whole suite under coverage).
+    """
+    gate = project_path / "tools" / "coverage_gate.py"
+    budget = project_path / "tools" / "config" / "coverage-budget.json"
+    if not (gate.exists() and budget.exists()):
+        print_warning("No coverage budget found, skipping coverage ratchet")
+        return None
+    return run_check(
+        "Coverage Ratchet",
+        [sys.executable, str(gate)],
+        timeout=900,
+    )
+
+
 def run_check(
     name: str, command: list[str], timeout: int = 120, required: bool = True
 ) -> dict:
@@ -246,6 +266,10 @@ def main():
         )
     else:
         print_warning("No tools/ test suite found, skipping pytest")
+
+    coverage_result = coverage_ratchet_check(project_path)
+    if coverage_result is not None:
+        results.append(coverage_result)
 
     if npm.exists():
         results.append(

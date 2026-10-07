@@ -33,6 +33,53 @@ def _load_checklist():
     return module
 
 
+def _budget_project(tmp_path: Path) -> Path:
+    """A project that carries both the ratchet script and a budget file."""
+    (tmp_path / "tools" / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "tools" / "coverage_gate.py").write_text("", encoding="utf-8")
+    (tmp_path / "tools" / "config" / "coverage-budget.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    return tmp_path
+
+
+def test_coverage_ratchet_skips_when_no_budget(tmp_path, capsys) -> None:
+    """A project that never opted into a budget must not be failed by it."""
+    module = _load_checklist()
+    assert module.coverage_ratchet_check(tmp_path) is None
+    assert "skipping coverage ratchet" in capsys.readouterr().out
+
+
+def test_coverage_ratchet_skips_when_gate_script_absent(tmp_path) -> None:
+    """Budget present but the script missing still skips rather than crashing."""
+    module = _load_checklist()
+    (tmp_path / "tools" / "config").mkdir(parents=True)
+    (tmp_path / "tools" / "config" / "coverage-budget.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    assert module.coverage_ratchet_check(tmp_path) is None
+
+
+def test_coverage_ratchet_runs_when_budget_present(tmp_path, monkeypatch) -> None:
+    """With both files present the gate is invoked, with a raised timeout."""
+    module = _load_checklist()
+    captured: dict = {}
+
+    def fake_run_check(name, command, timeout=120, required=True):
+        captured.update(name=name, command=command, timeout=timeout)
+        return {"name": name, "passed": True, "skipped": False}
+
+    monkeypatch.setattr(module, "run_check", fake_run_check)
+    result = module.coverage_ratchet_check(_budget_project(tmp_path))
+
+    assert result is not None and result["passed"] is True
+    assert captured["name"] == "Coverage Ratchet"
+    assert captured["command"][0] == sys.executable
+    assert captured["command"][1].endswith("coverage_gate.py")
+    # The ratchet runs the whole suite under coverage; the default 120s is too tight.
+    assert captured["timeout"] == 900
+
+
 def test_missing_required_tool_fails() -> None:
     """A required tool missing from PATH must FAIL the check."""
     module = _load_checklist()
