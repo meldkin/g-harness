@@ -220,6 +220,64 @@ def change_summary(root: Path = ROOT) -> dict[str, str]:
     return {"status": _git("status", "--porcelain"), "diffstat": _git("diff", "--stat")}
 
 
+# ── executor mode (mirrors .claude/hooks/guard.py) ───────────────────────────
+_EXECUTOR_OFF = frozenset({"off", "0", "disabled", "false", "no"})
+
+# Per-worker write fence, for the console's status panel. "read-only" means the
+# wrapper refuses writes without an explicit flag; "unfenced" means the delegate
+# wrapper enforces no write boundary of its own.
+_SANDBOX = {
+    "gemini": "read-only (writes need --allow-dir + --auto-approve)",
+    "codex": "read-only (writes need --allow-write)",
+    "opencode": "unfenced (wrapper can write)",
+    "kilo": "unfenced (wrapper can write)",
+    "dsh": "profile-defined",
+}
+
+
+def executor_mode_enabled(root: Path = ROOT) -> bool:
+    """True when the orchestrator write gate is ON. Absent file = ON (fail closed)."""
+    try:
+        raw = (root / ".solocode" / "executor-mode").read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return True
+    return raw.strip().split("#", 1)[0].strip().lower() not in _EXECUTOR_OFF
+
+
+def executor_mode_set(on: bool, root: Path = ROOT) -> None:
+    """Write the toggle: ON writes 'on', OFF writes the literal 'off'."""
+    directory = root / ".solocode"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "executor-mode").write_text(
+        "on\n" if on else "off\n", encoding="utf-8"
+    )
+
+
+# ── running streams, so the console can Stop one ─────────────────────────────
+_RUNNING: dict[str, Any] = {}
+_RUNNING_LOCK = threading.Lock()
+
+
+def stop_run(run_id: str) -> bool:
+    """Kill a streamed run by id. False when the id is unknown or already done."""
+    with _RUNNING_LOCK:
+        proc = _RUNNING.pop(run_id, None)
+    if proc is None:
+        return False
+    proc.kill()
+    return True
+
+
+def stop_all() -> int:
+    """Kill every streamed run. Returns how many were running."""
+    with _RUNNING_LOCK:
+        procs = list(_RUNNING.values())
+        _RUNNING.clear()
+    for proc in procs:
+        proc.kill()
+    return len(procs)
+
+
 def _sse(event: str, data: Any) -> bytes:
     """Frame one Server-Sent Event. Pure — tested directly."""
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n".encode()
@@ -229,13 +287,16 @@ def _sse(event: str, data: Any) -> bytes:
 _stream_argv = build_argv
 
 
-def stream_task(argv: list[str], timeout_s: int) -> Iterator[tuple[str, Any]]:
+def stream_task(
+    argv: list[str], timeout_s: int, run_id: str | None = None
+) -> Iterator[tuple[str, Any]]:
     """Yield (event, data) frames while running argv, merging stderr into stdout.
 
-    Events: ``start`` (the argv), ``chunk`` (one output line), ``error`` (launch
-    failure) and ``done`` (exit code, stop reason, post-run change summary).
+    Events: ``start`` (argv + run_id), ``chunk`` (one output line), ``error``
+    (launch failure) and ``done`` (exit code, stop reason, change summary). While
+    the child runs it is registered under ``run_id``, so the console can Stop it.
     """
-    yield ("start", {"argv": argv})
+    yield ("start", {"argv": argv, "run_id": run_id})
     try:
         proc = subprocess.Popen(  # noqa: S603 — fixed argv, allowlisted worker
             argv,
@@ -250,6 +311,9 @@ def stream_task(argv: list[str], timeout_s: int) -> Iterator[tuple[str, Any]]:
     except OSError as exc:
         yield ("error", {"error": str(exc)})
         return
+    if run_id is not None:
+        with _RUNNING_LOCK:
+            _RUNNING[run_id] = proc
     lines: queue.Queue[str | None] = queue.Queue()
 
     def _reader() -> None:
@@ -262,22 +326,27 @@ def stream_task(argv: list[str], timeout_s: int) -> Iterator[tuple[str, Any]]:
     threading.Thread(target=_reader, daemon=True).start()
     deadline = time.monotonic() + timeout_s
     timed_out = False
-    while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            timed_out = True
-            proc.kill()
-            break
-        try:
-            item = lines.get(timeout=min(remaining, 1.0))
-        except queue.Empty:
-            if proc.poll() is not None and lines.empty():
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                proc.kill()
                 break
-            continue
-        if item is None:
-            break
-        yield ("chunk", {"line": item.rstrip("\n")})
-    code = proc.wait()
+            try:
+                item = lines.get(timeout=min(remaining, 1.0))
+            except queue.Empty:
+                if proc.poll() is not None and lines.empty():
+                    break
+                continue
+            if item is None:
+                break
+            yield ("chunk", {"line": item.rstrip("\n")})
+        code = proc.wait()
+    finally:
+        if run_id is not None:
+            with _RUNNING_LOCK:
+                _RUNNING.pop(run_id, None)
     yield (
         "done",
         {
@@ -333,6 +402,8 @@ class Handler(BaseHTTPRequestHandler):
                     "providers": catalog,
                     "models": known_models(catalog),
                     "env_keys": env_key_names(),
+                    "executor_mode": executor_mode_enabled(),
+                    "sandboxes": _SANDBOX,
                     "default_timeout": self.timeout_default,
                 }
             )
@@ -340,7 +411,12 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, "text/plain; charset=utf-8", b"not found")
 
     def do_POST(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler API
-        if self.path not in ("/api/run", "/api/run/stream"):
+        if self.path not in (
+            "/api/run",
+            "/api/run/stream",
+            "/api/stop",
+            "/api/executor-mode",
+        ):
             self._send(404, "text/plain; charset=utf-8", b"not found")
             return
         if not self._authorized():
@@ -348,6 +424,18 @@ class Handler(BaseHTTPRequestHandler):
             return
         payload = self._read_payload()
         if payload is None:
+            return
+
+        if self.path == "/api/stop":
+            if payload.get("all"):
+                stopped = stop_all()
+            else:
+                stopped = 1 if stop_run(str(payload.get("run_id", ""))) else 0
+            self._json({"stopped": stopped})
+            return
+        if self.path == "/api/executor-mode":
+            executor_mode_set(bool(payload.get("on")))
+            self._json({"executor_mode": executor_mode_enabled()})
             return
 
         catalog = providers()
@@ -392,13 +480,14 @@ class Handler(BaseHTTPRequestHandler):
         timeout_s: int,
     ) -> None:
         argv = _stream_argv(worker, brief, model, flags)
+        run_id = secrets.token_hex(6)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         try:
-            for event, data in stream_task(argv, timeout_s):
+            for event, data in stream_task(argv, timeout_s, run_id):
                 self.wfile.write(_sse(event, data))
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):

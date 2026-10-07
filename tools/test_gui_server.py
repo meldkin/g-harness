@@ -281,3 +281,103 @@ def test_stream_endpoint_streams_output(server, monkeypatch):
     assert "hello-stream" in body  # the child's stdout reached the stream
     assert "event: done" in body
     assert '"stop": "completed"' in body
+
+
+def test_stream_start_event_carries_run_id(server, monkeypatch):
+    mod, port = server
+    monkeypatch.setattr(
+        mod, "_stream_argv", lambda _w, _b, _m, _f: [sys.executable, "-c", "print('x')"]
+    )
+    status, body = _call(
+        port,
+        "/api/run/stream",
+        token="tok123",
+        method="POST",  # noqa: S106 — test fixture
+        payload={"worker": "opencode", "brief": "x"},
+    )
+    assert status == 200
+    assert '"run_id": "' in body
+
+
+# ── executor mode / sandbox status ───────────────────────────────────────────
+
+
+def test_executor_mode_roundtrip(tmp_path):
+    mod = _load()
+    assert mod.executor_mode_enabled(tmp_path) is True  # absent -> ON (fail closed)
+    mod.executor_mode_set(False, tmp_path)
+    assert mod.executor_mode_enabled(tmp_path) is False
+    mod.executor_mode_set(True, tmp_path)
+    assert mod.executor_mode_enabled(tmp_path) is True
+
+
+def test_executor_mode_accepts_off_with_comment(tmp_path):
+    mod = _load()
+    (tmp_path / ".solocode").mkdir()
+    (tmp_path / ".solocode" / "executor-mode").write_text(
+        "off  # later\n", encoding="utf-8"
+    )
+    assert mod.executor_mode_enabled(tmp_path) is False
+
+
+def test_state_reports_executor_mode_and_sandboxes(server, monkeypatch):
+    mod, port = server
+    monkeypatch.setattr(mod, "executor_mode_enabled", lambda root=None: False)
+    status, body = _call(port, "/api/state", token="tok123")  # noqa: S106 — test fixture
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["executor_mode"] is False
+    assert "codex" in payload["sandboxes"]
+
+
+def test_executor_mode_endpoint_toggles(server, monkeypatch):
+    mod, port = server
+    seen: dict = {}
+    monkeypatch.setattr(
+        mod, "executor_mode_set", lambda on, root=None: seen.update(on=on)
+    )
+    monkeypatch.setattr(
+        mod, "executor_mode_enabled", lambda root=None: bool(seen.get("on"))
+    )
+    status, body = _call(
+        port,
+        "/api/executor-mode",
+        token="tok123",
+        method="POST",  # noqa: S106 — test fixture
+        payload={"on": True},
+    )
+    assert status == 200
+    assert seen["on"] is True
+    assert json.loads(body)["executor_mode"] is True
+
+
+# ── stop ─────────────────────────────────────────────────────────────────────
+
+
+def test_stop_run_and_stop_all():
+    mod = _load()
+    killed: list[int] = []
+
+    class FakeProc:
+        def kill(self):
+            killed.append(1)
+
+    mod._RUNNING["a"] = FakeProc()
+    mod._RUNNING["b"] = FakeProc()
+    assert mod.stop_run("a") is True
+    assert mod.stop_run("a") is False  # already gone
+    assert mod.stop_all() == 1
+    assert len(killed) == 2
+
+
+def test_stop_endpoint_unknown_run(server):
+    _, port = server
+    status, body = _call(
+        port,
+        "/api/stop",
+        token="tok123",
+        method="POST",  # noqa: S106 — test fixture
+        payload={"run_id": "nope"},
+    )
+    assert status == 200
+    assert json.loads(body)["stopped"] == 0

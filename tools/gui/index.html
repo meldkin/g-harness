@@ -76,7 +76,11 @@
       <label for="timeout" class="muted">timeout (s)</label>
       <input id="timeout" type="number" min="10" max="1800" value="300" style="width:90px">
     </div>
-    <button id="run">Run</button>
+    <div class="row" style="margin-top:6px">
+      <button id="run">Run</button>
+      <button id="stop" disabled style="background:#f85149;color:#fff">Stop</button>
+      <button id="toggle-exec" style="background:#2a2f3a;color:var(--fg)">executor-mode: ?</button>
+    </div>
     <div id="status" class="hint"></div>
     <div id="result" style="margin-top:12px"></div>
   </section>
@@ -93,6 +97,8 @@ async function api(path, opts = {}) {
 }
 
 let STATE = null;
+let EXEC_ON = true;
+let CURRENT_RUN = null;
 
 function renderState(s) {
   STATE = s;
@@ -112,9 +118,13 @@ function renderState(s) {
 
   const provCounts = Object.entries(s.providers).map(([k, v]) => k + "=" + v.length).join(", ");
   const c = $("catalog"); c.textContent = "";
+  EXEC_ON = !!s.executor_mode;
+  $("toggle-exec").textContent = "executor-mode: " + (EXEC_ON ? "ON" : "OFF");
   [["providers", provCounts || "(không đọc được .opencode/opencode.json)"],
    ["models", (s.models?.length || 0) + " model"],
-   [".env keys", (s.env_keys || []).join(", ")]].forEach(([k, v]) => {
+   [".env keys", (s.env_keys || []).join(", ")],
+   ["executor-mode", EXEC_ON ? "ON (orchestrator phải delegate khi ghi)" : "OFF"],
+   ["sandbox / worker", Object.entries(s.sandboxes || {}).map(([k, v]) => k + ": " + v).join(" · ")]].forEach(([k, v]) => {
     const d = document.createElement("div"); d.className = "kv";
     const a = document.createElement("span"); a.className = "muted"; a.textContent = k;
     const b = document.createElement("span"); b.textContent = v;
@@ -184,11 +194,12 @@ async function run() {
         if (!ev || dl === undefined) continue;
         const data = JSON.parse(dl);
         if (ev === "chunk") { outPre.textContent += data.line + "\n"; outPre.scrollTop = outPre.scrollHeight; }
-        else if (ev === "start") { metaPre.textContent = JSON.stringify(data.argv); }
-        else if (ev === "error") { $("status").textContent = "lỗi: " + data.error; }
+        else if (ev === "start") { metaPre.textContent = JSON.stringify(data.argv); CURRENT_RUN = data.run_id; $("stop").disabled = false; }
+        else if (ev === "error") { $("status").textContent = "lỗi: " + data.error; $("stop").disabled = true; CURRENT_RUN = null; }
         else if (ev === "done") {
           metaPre.textContent += "\nexit=" + data.exit + "  stop=" + data.stop + "\n" + JSON.stringify(data.changes);
           $("status").textContent = "xong sau " + ((Date.now() - t0) / 1000).toFixed(1) + "s";
+          $("stop").disabled = true; CURRENT_RUN = null;
         }
       }
     }
@@ -212,6 +223,14 @@ async function run() {
 }
 
 $("run").addEventListener("click", run);
+$("stop").addEventListener("click", async () => {
+  $("status").textContent = "đang dừng…";
+  await fetch("/api/stop", { method: "POST", headers: { "X-Token": TOKEN, "Content-Type": "application/json" }, body: JSON.stringify({ run_id: CURRENT_RUN }) });
+});
+$("toggle-exec").addEventListener("click", async () => {
+  await fetch("/api/executor-mode", { method: "POST", headers: { "X-Token": TOKEN, "Content-Type": "application/json" }, body: JSON.stringify({ on: !EXEC_ON }) });
+  await load();
+});
 load();
 </script>
 </body>
