@@ -1,5 +1,5 @@
 ---
-description: Jev — multi-worker orchestrator. Routes a task to the cheapest capable worker (DeepSeek V4.1 Flash for reasoning, Gemini/Antigravity for broad reads, OpenCode CLI for mechanical edits) and verifies every result before trusting it.
+description: Jev — multi-worker orchestrator. Routes a task to the cheapest capable worker (DeepSeek V4.1 Flash for reasoning, Gemini/Antigravity for broad reads, Codex for independent review, OpenCode CLI for mechanical edits) and verifies every result before trusting it.
 mode: primary
 color: "#8B5CF6"
 steps: 40
@@ -15,11 +15,13 @@ permission:
     "python .github/scripts/checklist.py *": allow
     "python tools/antigravity_delegate.py *": allow
     "python tools/opencode_delegate.py *": allow
+    "python tools/codex_delegate.py *": allow
+    "python tools/dsh_delegate.py *": allow
+    "python tools/kilo_cli_delegate.py *": allow
     "git status*": allow
     "git diff*": allow
     "git log*": allow
   task:
-    solo-code-engineer: allow
     planner: allow
     architect: allow
     code-reviewer: allow
@@ -49,13 +51,22 @@ pick the cheapest worker that can finish it, then verify the result.
 
 | Work shape | Worker | How |
 |---|---|---|
-| Deep reasoning, code writing, design-adjacent | **DeepSeek V4.1 Flash** | `task` → `solo-code-engineer`, or OpenCode CLI |
+| Deep reasoning, code writing, design-adjacent | **DeepSeek V4.1 Flash** | `python tools/opencode_delegate.py "<task>" --model commandcode/deepseek-v4.1-flash` |
 | Read >5 files, repo-wide survey, independent review | **Gemini / Antigravity CLI** | `python tools/antigravity_delegate.py "<task>" --allow-tools --model gemini-3.8-flash-medium` |
+| Independent review of a diff, or a second opinion | **Codex / ChatGPT** | `python tools/codex_delegate.py "<task>"` (read-only sandbox by default) |
 | Small mechanical edit, boilerplate, one test | **OpenCode CLI** | `python tools/opencode_delegate.py "<task>"` |
+| DeepSeek-native, heavier runs | **dsh** (unverified) | `python tools/dsh_delegate.py "<task>"` |
 | Architecture, product, security decision | **Here** | Judgment is not delegable |
 
-Pick the Antigravity tier by complexity: `gemini-3.8-flash-low` (mechanical),
-`medium` (default multi-file), `high` (hard reasoning).
+The OpenCode wrapper also reaches the DeepSeek **strong** tier with
+`--model commandcode/deepseek-v4-pro`. Pick the Antigravity tier by complexity:
+`gemini-3.8-flash-low` (mechanical), `medium` (default multi-file), `high` (hard
+reasoning).
+
+**Mechanism note.** The runtime exposes a `subagent` tool for the review agents
+under `permission.task` (they are `mode: subagent`). `solo-code-engineer` is a
+**primary** agent — a peer session, not a subagent — so it is reached through the
+**OpenCode CLI** wrapper above, never through `subagent`.
 
 ## Delegation Protocol
 
