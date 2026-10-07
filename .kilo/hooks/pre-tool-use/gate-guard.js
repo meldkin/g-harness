@@ -30,12 +30,13 @@ const MAX_STDIN = 1024 * 1024;
 // and `rg "rm /" .`, and blocked both. An over-block is worse than a miss here:
 // a guard that blocks routine work gets switched off.
 const RM_CMD = '(?:^|[;&|\\n]\\s*|\\bxargs\\s+)rm\\s+(?:--\\s+)?';
-// Only the flags that make an rm destructive, in any order: -rf, -fr, -r -f,
-// --recursive --force. A bare [a-zA-Z] class also swallowed -v and -i, so
-// `rm -v /var/log/app.log` looked like a recursive wipe.
-const RM_FLAGS = '(?:-[rRfF]+\\s+|--(?:recursive|force)\\s+|--\\s+)*';
-// A path that resolves to the filesystem root: `/`, `//`, `/./`, `/.`, `/../`.
-const ROOT_PATH = '/(?:/|\\.+/?)*';
+// At least one destructive flag (`+`, not `*`): a flagless `rm` cannot remove a
+// directory, and matching zero flags made `rm *.tmp` and `rm /tmp/test.pid`
+// look like recursive wipes.
+const RM_FLAGS = '(?:-[rRfF]+\\s+|--(?:recursive|force)\\s+|--\\s+)+';
+// A path resolving to a filesystem root: `/`, `//`, `/./`, `/.`, `/../`, plus
+// the Windows `C:/` and git-bash `/c/` spellings.
+const ROOT_PATH = '(?:/(?:/|\\.+/?)*|[A-Za-z]:[/\\\\]+|/[A-Za-z]/+)';
 const BLOCK_PATTERNS = [
   { name: 'rm_root', pattern: new RegExp(RM_CMD + RM_FLAGS + ROOT_PATH + '(?:\\s|$|\\*|"|\')') },
   { name: 'rm_home', pattern: new RegExp(RM_CMD + RM_FLAGS + '~') },
@@ -49,9 +50,15 @@ const BLOCK_PATTERNS = [
   { name: 'force_push_main', pattern: /git\s+push\s+.*(--force|-f)\s+.*(main|master)/ },
   // The segment stops at a shell separator, because
   // `git push origin main && npm install --force` was being read as a force-push.
-  // `--force-with-lease` stays allowed: it is the safe alternative we recommend.
-  { name: 'force_push_any', pattern: /git\s+push\b[^&|;\n]*(?:--force\b(?!-)|(?:^|\s)-f\b)/ },
-  { name: 'git_reset_hard', pattern: /git\b.*\breset\b.*--hard/ },
+  // `-fu` style bundles count (a bare `-f\b` missed them). `--force-with-lease`
+  // stays allowed: it is the safe alternative this harness recommends.
+  { name: 'force_push_any', pattern: /git\s+push\b[^&|;\n]*(?:--force\b(?!-)|(?:^|\s)(?!-{2})-[a-zA-Z]*f[a-zA-Z]*\b)/ },
+  // The `+branch` refspec force-pushes without any flag. AGENTS.md names this
+  // exact form as forbidden, and nothing matched it.
+  { name: 'force_push_refspec', pattern: /git\s+push\b[^&|;\n]*\s\+[^\s&|;]+/ },
+  // Anchored to the subcommand so a commit message that merely mentions the
+  // phrase is not blocked. `--ha`/`--har` count: git takes abbreviations.
+  { name: 'git_reset_hard', pattern: /(?:^|[;&|]\s*)git\s+(?:-C\s+\S+\s+|-c\s+\S+\s+|--\S+\s+)*reset\b[^&|;\n]*--ha(?:rd?)?/ },
   { name: 'git_clean_force', pattern: /git\s+clean\s+-f/ },
   { name: 'drop_table', pattern: /DROP\s+(?:TABLE|DATABASE)/i },
   { name: 'truncate_table', pattern: /TRUNCATE\s+TABLE/i },

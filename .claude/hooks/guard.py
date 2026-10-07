@@ -34,13 +34,16 @@ from pathlib import Path
 # and `rg "rm /" .`, and blocked both. An over-block is worse than a miss here:
 # a guard that blocks routine work gets switched off.
 _RM_CMD = r"(?:^|[;&|\n]\s*|\bxargs\s+)rm\s+(?:--\s+)?"
-# Only the flags that make an rm destructive, in any order: -rf, -fr, -r -f,
-# --recursive --force. A bare `[a-zA-Z]` class also swallowed `-v` and `-i`, so
-# `rm -v /var/log/app.log` looked like a recursive wipe.
-_RM_FLAGS = r"(?:-[rRfF]+\s+|--(?:recursive|force)\s+|--\s+)*"
-# A path that resolves to the filesystem root: `/`, `//`, `/./`, `/.`, `/../`.
-# Matching a bare `/` let `rm -rf //` and `rm -rf /./` straight through.
-_ROOT_PATH = r"/(?:/|\.+/?)*"
+# Only the flags that make an rm destructive, any order, and at least one of them.
+# `+` rather than `*` because a flagless `rm` cannot remove a directory: matching
+# zero flags made `rm *.tmp` and `rm /tmp/test.pid` look like recursive wipes.
+# A bare `[a-zA-Z]` class also swallowed `-v` and `-i`.
+_RM_FLAGS = r"(?:-[rRfF]+\s+|--(?:recursive|force)\s+|--\s+)+"
+# A path that resolves to a filesystem root: `/`, `//`, `/./`, `/.`, `/../`, plus
+# the Windows `C:/` and git-bash `/c/` spellings. Matching a bare `/` let
+# `rm -rf //` and `rm -rf /./` through; omitting the drive roots let
+# `rm -rf C:/` through.
+_ROOT_PATH = r"(?:/(?:/|\.+/?)*|[A-Za-z]:[/\\]+|/[A-Za-z]/+)"
 
 BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("rm_root", re.compile(rf"{_RM_CMD}{_RM_FLAGS}{_ROOT_PATH}(?:\s|$|\*|\"|')")),
@@ -50,10 +53,18 @@ BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("force_push_main", re.compile(r"git\s+push\s+.*(--force|-f)\s+.*(main|master)")),
     # The flag may follow the branch, or be absent entirely. The segment stops at
     # a shell separator, because `git push origin main && npm install --force`
-    # was being read as a force-push. `--force-with-lease` stays allowed: it is
-    # the safe alternative this harness recommends.
-    ("force_push_any", re.compile(r"git\s+push\b[^&|;\n]*(?:--force\b(?!-)|(?:^|\s)-f\b)")),
-    ("git_reset_hard", re.compile(r"git\b.*\breset\b.*--hard")),
+    # was being read as a force-push. `-fu` style bundles count (a bare `-f\b`
+    # missed them). `--force-with-lease` stays allowed: it is the safe
+    # alternative this harness recommends.
+    ("force_push_any", re.compile(r"git\s+push\b[^&|;\n]*(?:--force\b(?!-)|(?:^|\s)(?!-{2})-[a-zA-Z]*f[a-zA-Z]*\b)")),
+    # The `+branch` refspec force-pushes without any flag. AGENTS.md names this
+    # exact form as forbidden, and nothing matched it.
+    ("force_push_refspec", re.compile(r"git\s+push\b[^&|;\n]*\s\+[^\s&|;]+")),
+    # Anchored to the subcommand: `reset` must come directly after `git` (only
+    # options may precede it). The unanchored form blocked a commit message that
+    # merely mentioned the phrase. `--ha`/`--har` are accepted because git takes
+    # unambiguous abbreviations.
+    ("git_reset_hard", re.compile(r"(?:^|[;&|]\s*)git\s+(?:-C\s+\S+\s+|-c\s+\S+\s+|--\S+\s+)*reset\b[^&|;\n]*--ha(?:rd?)?")),
     ("drop_table", re.compile(r"DROP\s+(?:TABLE|DATABASE)", re.I)),
     ("truncate_table", re.compile(r"TRUNCATE\s+TABLE", re.I)),
     ("dd_raw", re.compile(r"dd\s+if=")),
@@ -69,7 +80,7 @@ BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("format_disk", re.compile(r"(?:^|[;&|]\s*)format\s+(?:/\S+\s+)*[a-zA-Z]:", re.I)),
     ("diskpart", re.compile(r"\bdiskpart\b")),
     ("shutdown_system", re.compile(r"(?:shutdown|reboot|halt)\b")),
-    ("rm_relative_wildcard", re.compile(r"rm\s+-rf?\s+\./")),
+    ("rm_relative_wildcard", re.compile(rf"{_RM_CMD}{_RM_FLAGS}\./")),
     ("rm_r_wildcard", re.compile(r"rm\s+-r\s+\*")),
     ("rm_r_f_wildcard", re.compile(r"rm\s+-r\s+-f\s+\*")),
     ("git_clean_force", re.compile(r"git\s+clean\s+-f")),
@@ -81,7 +92,7 @@ BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     # temp path the code uses; splitting the f-string made bandit see `/tmp/` as
     # its own constant and fire hardcoded_tmp_directory.
     ("rm_temp_linux", re.compile(rf"{_RM_CMD}{_RM_FLAGS}/tmp/")),  # noqa: S108
-    ("rm_temp_win", re.compile(r"rm\s+-rf?\s+\$?(?:env:)?TEMP\b", re.I)),
+    ("rm_temp_win", re.compile(rf"{_RM_CMD}{_RM_FLAGS}\$?(?:env:)?TEMP\b", re.I)),
     ("del_temp_win", re.compile(r"del\s+(?:/f\s+)?/[qs]\s+\$?(?:env:)?TEMP\b", re.I)),
     ("win_rd_recursive", re.compile(r"(?:rd|rmdir)\s+(?:.*\s)?/s\b", re.I)),
     ("win_del_any", re.compile(r"del\s+(?:.*\s)?/[qsf]\b", re.I)),

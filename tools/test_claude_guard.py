@@ -89,6 +89,13 @@ BLOCKED_COMMANDS = [
     "rm -rf -- /",
     "rm -rf --preserve-root=no /",
     "cd /tmp && rm -rf /",
+    # Found by an independent (Gemini) review of the fix above, each verified by
+    # execution in BOTH engines before being accepted.
+    "git push origin +main",
+    "git push -fu origin main",
+    "git reset --har HEAD",
+    "rm -rf C:/",
+    "rm -rf /c/",
 ]
 
 
@@ -125,6 +132,13 @@ SAFE_COMMANDS = [
     "git push origin main; tail -f app.log",
     "git push --force-with-lease origin main && tail -f log",
     "rm -v /var/log/app.log",
+    # Over-blocks introduced by the flag-order fix, found by the same review.
+    # `_RM_FLAGS` used to match zero flags, so a flagless `rm` on a file looked
+    # like a recursive wipe, and `git_reset_hard` matched inside a commit message.
+    "rm ./build.log",
+    "rm *.tmp",
+    "rm /tmp/test.pid",
+    'git commit -m "fix git reset --hard issue"',
 ]
 
 
