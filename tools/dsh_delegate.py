@@ -21,11 +21,13 @@ Usage:
     python tools/dsh_delegate.py "<self-contained task>"
     python tools/dsh_delegate.py "<task>" --profile headless --timeout 600
 
-Headless note (found on a real run): a checkout whose `node_modules` is out of
-sync makes pnpm run its dependency check, which aborts without a TTY
-(ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY). Set `CI=true` (or run
-`pnpm install` once). dsh running from source also needs the workspace built --
-otherwise its packages report "failed to import".
+Headless note (all found on a real run):
+  - `pnpm dsh` first runs pnpm's dependency check; without a TTY it aborts
+    (ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY). Set `CI=true` to let it pass.
+  - deps may be fully installed ("Already up to date") and dsh still fails: its
+    entry runs from source (`node --import tsx/esm apps/cli/src/bin.ts`), but the
+    workspace packages are consumed from their built output, so several report
+    "failed to import" until `pnpm build` has been run once in the checkout.
 """
 
 from __future__ import annotations
