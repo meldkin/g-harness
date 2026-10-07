@@ -9,11 +9,11 @@
 # [shared_files] mới là harness; file khác ở đó là CODE DỰ ÁN.
 
 [harness]
-version = "4.2.0"
+version = "4.3.0"
 source = "solo-code-io/solo-code-cli"
-generated_at = "2026-09-11T00:00:00Z"
+generated_at = "2026-10-07T00:00:00Z"
 
-# --- ENGINE STATUS (v4.2.0) ---
+# --- ENGINE STATUS (v4.3.0) ---
 # .opencode/  -> first-class primary agent engine, now targeting OpenCode v2
 #                (@opencode/cli + @opencode/plugin; the v1 line opencode-ai /
 #                @opencode-ai/plugin is retired). tools/opencode_engine.py
