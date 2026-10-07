@@ -212,3 +212,31 @@ def test_main_propagates_nonzero_exit(monkeypatch, tmp_path):
     monkeypatch.setattr(mod, "load_env_file", lambda _p: {"DEEPSEEK_API_KEY": "k"})
     monkeypatch.setattr(mod, "run_dsh", lambda **_k: (7, "", "boom"))
     assert mod.main(["task"]) == 7
+
+
+# ── encoding safety ──────────────────────────────────────────────────────────
+
+
+def test_encoding_safe_tolerates_streams_without_reconfigure(monkeypatch):
+    mod = _load()
+
+    class Plain:
+        pass
+
+    monkeypatch.setattr(mod.sys, "stdout", Plain())
+    monkeypatch.setattr(mod.sys, "stderr", Plain())
+    mod._make_streams_encoding_safe()  # must not raise
+
+
+def test_encoding_safe_reconfigures_both_streams(monkeypatch):
+    mod = _load()
+    calls: list[dict] = []
+
+    class Reconfigurable:
+        def reconfigure(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setattr(mod.sys, "stdout", Reconfigurable())
+    monkeypatch.setattr(mod.sys, "stderr", Reconfigurable())
+    mod._make_streams_encoding_safe()
+    assert calls == [{"encoding": "utf-8", "errors": "replace"}] * 2

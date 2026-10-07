@@ -20,11 +20,18 @@ Usage:
     python tools/dsh_delegate.py --self-test
     python tools/dsh_delegate.py "<self-contained task>"
     python tools/dsh_delegate.py "<task>" --profile headless --timeout 600
+
+Headless note (found on a real run): a checkout whose `node_modules` is out of
+sync makes pnpm run its dependency check, which aborts without a TTY
+(ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY). Set `CI=true` (or run
+`pnpm install` once). dsh running from source also needs the workspace built --
+otherwise its packages report "failed to import".
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import shutil
 import subprocess  # noqa: S404 — runs this checkout's own pinned launcher
@@ -40,6 +47,21 @@ ENV_KEYS = ("DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL")
 
 def _stderr(message: str) -> None:
     print(f"[dsh_delegate] {message}", file=sys.stderr)
+
+
+def _make_streams_encoding_safe() -> None:
+    """Never crash on worker output the console encoding cannot represent.
+
+    dsh prints check marks / box-drawing characters; the Windows console default
+    (cp1252) raised UnicodeEncodeError mid-report on a real run. Reconfigure both
+    streams to UTF-8 with replacement, exactly as opencode_delegate does.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        with contextlib.suppress(ValueError, OSError):
+            reconfigure(encoding="utf-8", errors="replace")
 
 
 def load_env_file(path: Path) -> dict[str, str]:
@@ -150,12 +172,19 @@ def _self_test() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _make_streams_encoding_safe()
     parser = argparse.ArgumentParser(description="DeepSeek Harness delegation wrapper")
     parser.add_argument("prompt", nargs="?", help="Self-contained task for dsh")
-    parser.add_argument("--profile", default="headless", help="dsh profile (default: headless)")
-    parser.add_argument("--dsh-dir", help="Path to the dsh checkout (default: auto-detect)")
+    parser.add_argument(
+        "--profile", default="headless", help="dsh profile (default: headless)"
+    )
+    parser.add_argument(
+        "--dsh-dir", help="Path to the dsh checkout (default: auto-detect)"
+    )
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
-    parser.add_argument("--self-test", action="store_true", help="Validate setup without running dsh")
+    parser.add_argument(
+        "--self-test", action="store_true", help="Validate setup without running dsh"
+    )
     args = parser.parse_args(argv)
 
     if args.self_test:
