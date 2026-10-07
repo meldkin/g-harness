@@ -37,7 +37,7 @@ Key security boundaries:
 
 | Boundary | Mechanism |
 |----------|-----------|
-| Destructive command prevention | Guard plugin v2.5 — 33 destructive patterns blocked |
+| Destructive command prevention | Guard plugin v2.5 — 41 destructive patterns blocked |
 | Secret detection | Pre-commit hooks + `security_scan.py` — 11 secret patterns |
 | Git safety | No force-push to main, commit message scanning |
 | Config protection | 19 protected config files (ESLint, Prettier, Ruff, etc.) |

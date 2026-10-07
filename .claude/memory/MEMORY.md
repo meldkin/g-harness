@@ -21,7 +21,7 @@ High-signal context loaded at session start. Detailed history belongs in
 - [tech] Python 3.10+ stdlib runtime for `tools/` and `.github/scripts/`;
   pytest/ruff are dev tools. Kilo hooks use Node.js 18+.
 - [tech] Ruff config: `.ruff.toml`; secrets: `.gitleaks.toml`.
-- [tech] Codex CLI 0.154.0 (npm global) is a harness consumer: it reads
+- [tech] Codex CLI 0.160.0 (npm global) is a harness consumer: it reads
   `AGENTS.md` natively, so no `.codex/` engine mirror is generated. Launcher
   `codex-env.ps1`, metering `tools/codex_usage.py`.
 - [tech] SQLite shared state: `.solocode/shared-state.db`. Only `session_log`
@@ -56,15 +56,6 @@ High-signal context loaded at session start. Detailed history belongs in
   trusting the gate.
 
 ## Decisions
-- [decision] Step 5 Preview model routes (2026-10-06): four OpenCode v2 providers --
-  `commandcode`, `freemodel`, `deepseek` (official), `openrouter` -- 31 models total.
-  `_SMALL_MODEL` moved to `commandcode/deepseek-v4.1-flash`. Ids were verified live:
-  the official DeepSeek API names V4.1 Flash **`deepseek-flash`** (reported name
-  "DeepSeek-V4.1-Flash", ctx 1,048,576); the id `deepseek-v4.1-flash` exists on
-  CommandCode (84 models) and OpenRouter (465 models). OpenRouter's endpoint is a
-  fixed public constant; only `OPENROUTER_API_KEY` is secret. `Space Bunny Alpha` is
-  absent from every catalog and was dropped. A new orchestrator agent `jev` routes
-  between DeepSeek V4.1 Flash, Gemini/Antigravity, and OpenCode CLI.
 - [decision] Antigravity headless `agy.exe` delegate **re-established** after
   the retirement rationale was disproven: the account lockouts were a
   Google-side update bug, not bot-traffic flags from `agy.exe`; the accounts
@@ -107,11 +98,20 @@ High-signal context loaded at session start. Detailed history belongs in
   operator-confirmed 2026-10-07): a headless child session has no prompt
   channel, so `effect: ask` silently permits -- the operator saw no dialog
   appear during a two-command probe. Use explicit `allow`/`deny`; never `ask`.
-- [decision] Guard hardening (2026-10-07), mirrored in `.claude/hooks/guard.py`
-  and `.kilo/hooks/pre-tool-use/gate-guard.js`: shared `_RM_FLAGS` takes any
-  `-r`/`-f` order, `force_push_any` matches a trailing `--force`, and
-  `env_assignment_secret` catches unquoted `NAME=value`. `--force-with-lease`
-  and `KEY="$(...)"` stay allowed on purpose.
+- [decision] Guard hardening (2026-10-07): 33 -> 41 destructive patterns in
+  `.claude/hooks/guard.py` + `.kilo/hooks/pre-tool-use/gate-guard.js`. Eight
+  verified holes closed; four independent Codex (gpt-6.1-sol) review rounds ran,
+  and every self-inflicted regression they found was fixed (over-blocks on quoted
+  searches / `./build` / `..`-named files; `bash -c` and wrapped-`curl|bash`
+  divergences). New patterns anchor to command position, and Kilo gained a
+  `normalizeCommand` port so both engines unwrap `sudo`/`env`/`bash -c` alike.
+  Pre-existing gaps still open, and the full finding list, are in
+  `decisions-archive.md`. The checklist Pytest timeout rose 120s -> 300s (suite
+  ~95-130s on Windows).
+- [decision] Six 0.0%-coverage tools given tests and the ratchet baseline raised
+  (check_skips 52.9%, solocode_config 66.3%, compaction 79.5%, harness_config
+  94.4%, codex_verify 95.2%, kilo_usage_report 98.2%). `pre-commit` is installed
+  and the git hook is active (2026-10-07).
 - [decision] Subagent reviewers hold `read` + `edit`, no shell for
   `code-reviewer`. Garden gained "Permission drift" (agent `permission:` block
   vs `.copilot`/`.gemini`) and "Agent tools drift" (derived `.claude` `tools:`);

@@ -21,6 +21,10 @@ repos:
       - id: check-merge-conflict
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Pinned to v0.9.1 on purpose: the committed sources are formatted with this
+    # line (bumping to 0.15.x reformats 59 files -- a change of its own). Its one
+    # stale rule, UP038, is satisfied in code as `isinstance(x, int | float)`;
+    # the checklist's newer ruff no longer raises UP038, so both agree.
     rev: v0.9.1
     hooks:
       - id: ruff

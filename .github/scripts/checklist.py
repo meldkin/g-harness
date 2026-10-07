@@ -43,9 +43,9 @@ except UnicodeEncodeError:
 
 
 def print_header(text: str):
-    print(f"\n{Colors.BOLD}{Colors.CYAN}{'='*60}{Colors.ENDC}")
+    print(f"\n{Colors.BOLD}{Colors.CYAN}{'=' * 60}{Colors.ENDC}")
     print(f"{Colors.BOLD}{Colors.CYAN}{text.center(60)}{Colors.ENDC}")
-    print(f"{Colors.BOLD}{Colors.CYAN}{'='*60}{Colors.ENDC}\n")
+    print(f"{Colors.BOLD}{Colors.CYAN}{'=' * 60}{Colors.ENDC}\n")
 
 
 def print_step(text: str):
@@ -193,9 +193,7 @@ def main():
     # P1: Lint & Type Check
     print_header("P1: CODE QUALITY")
     results.append(
-        run_check(
-            "Ruff Linter", ["ruff", "check", str(project_path)], timeout=120
-        )
+        run_check("Ruff Linter", ["ruff", "check", str(project_path)], timeout=120)
     )
 
     npm = project_path / "package.json"
@@ -247,7 +245,11 @@ def main():
         results.append(
             run_check(
                 "Guard Hook Syntax",
-                [sys.executable, "-c", f"import py_compile; py_compile.compile(r'{guard_hook}', doraise=True)"],
+                [
+                    sys.executable,
+                    "-c",
+                    f"import py_compile; py_compile.compile(r'{guard_hook}', doraise=True)",
+                ],
                 timeout=30,
             )
         )
@@ -257,11 +259,15 @@ def main():
     # Python pytest suite under tools/
     tools_dir = project_path / "tools"
     if tools_dir.is_dir() and any(tools_dir.rglob("test_*.py")):
+        # timeout=300, not 120: the suite runs ~95-130s on Windows (the guard
+        # parity corpus launches node + python per case), so 120 sat on the
+        # boundary and produced intermittent "Pytest: TIMEOUT" failures under
+        # load. The other long steps (coverage, npm) already allow 300-900s.
         results.append(
             run_check(
                 "Pytest",
                 [sys.executable, "-m", "pytest", str(tools_dir)],
-                timeout=120,
+                timeout=300,
             )
         )
     else:
@@ -274,7 +280,10 @@ def main():
     if npm.exists():
         results.append(
             run_check(
-                "Tests", ["npm", "test", "--", "--passWithNoTests"], timeout=300, required=False
+                "Tests",
+                ["npm", "test", "--", "--passWithNoTests"],
+                timeout=300,
+                required=False,
             )
         )
     else:
@@ -283,7 +292,9 @@ def main():
     # P3: Build check
     print_header("P3: BUILD")
     if npm.exists():
-        results.append(run_check("Build", ["npm", "run", "build"], timeout=300, required=False))
+        results.append(
+            run_check("Build", ["npm", "run", "build"], timeout=300, required=False)
+        )
 
     all_passed = print_summary(results)
     sys.exit(0 if all_passed else 1)

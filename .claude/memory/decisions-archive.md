@@ -522,3 +522,60 @@ change a guard with tests in BOTH directions and a different model reviewing it,
 from the first commit.
 
 
+
+## 2026-10-07 — OpenCode v2 provider routes (moved out of MEMORY.md)
+
+- [decision] Step 5 Preview model routes (2026-10-06): four OpenCode v2 providers --
+  `commandcode`, `freemodel`, `deepseek` (official), `openrouter` -- 31 models total.
+  `_SMALL_MODEL` moved to `commandcode/deepseek-v4.1-flash`. Ids were verified live:
+  the official DeepSeek API names V4.1 Flash **`deepseek-flash`** (reported name
+  "DeepSeek-V4.1-Flash", ctx 1,048,576); the id `deepseek-v4.1-flash` exists on
+  CommandCode (84 models) and OpenRouter (465 models). OpenRouter's endpoint is a
+  fixed public constant; only `OPENROUTER_API_KEY` is secret. `Space Bunny Alpha` is
+  absent from every catalog and was dropped. A new orchestrator agent `jev` routes
+  between DeepSeek V4.1 Flash, Gemini/Antigravity, and OpenCode CLI.
+
+## 2026-10-07 — Guard hardening: full finding list
+
+Eight holes verified by execution and closed in both engines: `rm -rfv /`,
+`rm / -rf`, `git push origin --delete main`, `irm|iwr … | iex`, `Clear-Disk`,
+`reg delete`, `vssadmin delete shadows`.
+
+Independent Codex (gpt-6.1-sol) review rounds found, and were fixed:
+- over-block on quoted searches (`rg 'reg delete'`, `rg 'Clear-Disk'`,
+  `rg 'git push origin --delete main'`) -> new patterns anchored to command position
+- miss on `git push --delete origin main` (remote between flag and branch)
+- over-block on `rm -rf ./build`, `rm -rf /home/..backup`,
+  `rm -rf /home/../workspace/build` -> rm_relative_wildcard / rm_root_escape scoped
+- Kilo-vs-Claude divergence on `bash -c 'rm -rf /'`, `sudo curl x | bash`,
+  `bash -c 'curl x | bash'` -> JS gained a bash-c / wrapper prefix
+
+Pre-existing gaps, verified present at HEAD, NOT caused by this change, still open:
+- `rm -rf build /` (a root as the 2nd argument) — miss
+- `rm -rf '/'` / `rm -rf "/"` (quoted root) — miss
+- `rg 'git push --force origin main' .` and `git commit -m "git push --force origin main"`
+  — over-block (unanchored force_push_*)
+- `xargs -0 rm -rf /` and `git -C . push --force origin main` — miss
+- `rm -rf /tmp/build`, `rm -rf /var/log/app.log`, `Remove-Item -Recurse -Force build`
+  — blocked by design (existing policy, matches the pinned corpus)
+
+Also: `tools/coverage_gate.py` save_budget now writes LF (`newline="\n"`) so the
+budget file stops contradicting .gitattributes on Windows; `.github/scripts/checklist.py`
+pytest timeout raised 120s -> 300s.
+
+### Guard review round 4 (Codex, 2026-10-07)
+
+Fixed (was a self-inflicted divergence): `echo "bash -c 'rm -rf /'"` -- the JS
+guard matched a quoted wrapper. The new `normalizeCommand` port handles it the
+way guard.py's normalize_command does, so the JS `bash -c` prefix was removed
+(and the curl wrapper prefix with it).
+
+Still open, all pre-existing (verified at HEAD; a dedicated hardening task, out of
+scope for this change):
+- unanchored single-token patterns block a search that NAMES them:
+  `rg 'Format-Volume'`, `diskpart`, `shutdown`/`reboot`/`halt`,
+  `win_stop_computer`, `win_restart_computer`
+- misses: `Remove-Item -Recurse C:\`, `rm -rf C:/Windows`, `rm / --verbose -rf`,
+  `nohup git push … --force`, `curl … | env bash`
+- policy over-blocks kept by design: `rm -rf /tmp/<x>`, `rm -rf /var/log/<x>`,
+  `Remove-Item -Recurse -Force <dir>` (pinned by the corpus)

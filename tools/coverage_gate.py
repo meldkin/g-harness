@@ -51,10 +51,9 @@ def load_budget(budget_file: Path = BUDGET_FILE) -> dict[str, float]:
 
         # Validate all values are numeric
         for path, coverage in files.items():
-            if not isinstance(coverage, (int, float)) or coverage < 0 or coverage > 100:
+            if not isinstance(coverage, int | float) or coverage < 0 or coverage > 100:
                 raise ValueError(
-                    f"Invalid coverage for {path}: {coverage} "
-                    "(must be 0-100)"
+                    f"Invalid coverage for {path}: {coverage} (must be 0-100)"
                 )
 
         return files
@@ -62,17 +61,21 @@ def load_budget(budget_file: Path = BUDGET_FILE) -> dict[str, float]:
         raise ValueError(f"Malformed budget file: {exc}") from exc
 
 
-def save_budget(coverage_data: dict[str, float], budget_file: Path = BUDGET_FILE) -> None:
+def save_budget(
+    coverage_data: dict[str, float], budget_file: Path = BUDGET_FILE
+) -> None:
     """Save per-file coverage budget to JSON."""
     budget_file.parent.mkdir(parents=True, exist_ok=True)
 
-    payload = {
-        "files": dict(sorted(coverage_data.items()))
-    }
+    payload = {"files": dict(sorted(coverage_data.items()))}
 
+    # newline="\n": on Windows the default translation writes CRLF, which
+    # contradicts .gitattributes (`* text=auto eol=lf`) and leaves the file
+    # dirty until Git renormalises it. Write LF on every platform.
     budget_file.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8"
+        encoding="utf-8",
+        newline="\n",
     )
 
 
@@ -87,16 +90,20 @@ def run_coverage() -> dict[str, float]:
         capture_output=True,
         text=True,
         timeout=10,
-        check=False
+        check=False,
     )
 
     if check_proc.returncode != 0:
-        raise RuntimeError("pytest not installed. Install with: pip install pytest pytest-cov")
+        raise RuntimeError(
+            "pytest not installed. Install with: pip install pytest pytest-cov"
+        )
 
     # Run pytest with coverage
     proc = subprocess.run(
         [
-            "python", "-m", "pytest",
+            "python",
+            "-m",
+            "pytest",
             "tools/",
             "--ignore=deepseek-harness-master",
             "--cov=tools",
@@ -104,13 +111,13 @@ def run_coverage() -> dict[str, float]:
             "--cov=.github/scripts",
             "--cov-report=json",
             "--cov-report=term-missing",
-            "-q"
+            "-q",
         ],
         capture_output=True,
         text=True,
         timeout=300,
         check=False,
-        cwd=ROOT
+        cwd=ROOT,
     )
 
     # Coverage writes to coverage.json by default
@@ -151,7 +158,9 @@ def run_coverage() -> dict[str, float]:
     return files_coverage
 
 
-def check_ratchet(budget: dict[str, float], current: dict[str, float]) -> tuple[bool, list[str]]:
+def check_ratchet(
+    budget: dict[str, float], current: dict[str, float]
+) -> tuple[bool, list[str]]:
     """Check if coverage decreased for any file.
 
     Returns:
@@ -212,9 +221,13 @@ def main() -> int:
             elif new is None:
                 print(f"  [GONE] {file_path}: was {old:.1f}%")
             elif new < old:
-                print(f"  [DOWN] {file_path}: {old:.1f}% -> {new:.1f}% (-{old-new:.1f}%)")
+                print(
+                    f"  [DOWN] {file_path}: {old:.1f}% -> {new:.1f}% (-{old - new:.1f}%)"
+                )
             elif new > old:
-                print(f"  [UP]   {file_path}: {old:.1f}% -> {new:.1f}% (+{new-old:.1f}%)")
+                print(
+                    f"  [UP]   {file_path}: {old:.1f}% -> {new:.1f}% (+{new - old:.1f}%)"
+                )
             else:
                 print(f"  [OK]   {file_path}: {new:.1f}%")
 
