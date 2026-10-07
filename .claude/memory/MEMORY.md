@@ -56,19 +56,11 @@ High-signal context loaded at session start. Detailed history belongs in
   trusting the gate.
 
 ## Decisions
-- [decision] Antigravity headless `agy.exe` delegate **re-established** after
-  the retirement rationale was disproven: the account lockouts were a
-  Google-side update bug, not bot-traffic flags from `agy.exe`; the accounts
-  were reopened and the CLI was never implicated (2026-10-06). Worker runs
-  through `tools/antigravity_delegate.py` — read-only by default, writes need
-  `--allow-dir` + `--auto-approve` with a shared-state directory lock and
-  post-run scope audit. Model is chosen by task complexity via the distinct ids
-  `gemini-3.8-flash-{low,medium,high}`. Quota rotation is manual: `agy.exe`
-  uses the machine-level Antigravity Google account and has no per-run account
-  flag; switch account with `/logout` then re-sign-in, check quota with `/usage`,
-  and resume with `--conversation <id>` or `--continue-latest`. A Gemini API key
-  (`modelProvider: "gemini"` + `GEMINI_API_KEY`) is the headless alternative.
-  Auth/settings details and doc links are in `decisions-archive.md`.
+- [decision] Antigravity headless `agy.exe` delegate re-established (2026-10-06);
+  runs through `tools/antigravity_delegate.py` (read-only default, writes need
+  `--allow-dir` + `--auto-approve` with a shared-state lock and scope audit), tiers
+  `gemini-3.8-flash-{low,medium,high}`. Quota rotation and auth details are in
+  `decisions-archive.md`.
 - [decision] Antigravity headless permission behavior (measured 2026-10-06 on
   `agy.exe` 1.2.9): the exit codes (5 on denied actions, 2 on empty output), the
   `--allow-tools` flag and its mutual exclusions, and the `view_file` /

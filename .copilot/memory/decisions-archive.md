@@ -614,3 +614,18 @@ Still open (pre-existing; its own task, not this change):
   audit); it is mutually exclusive with `--auto-approve`, `--allow-dir`, and
   `--no-guardrail`. `view_file` works read-only with an absolute path;
   `grep_search`/`list_dir` usage was unreliable at the low model tier.
+
+## Antigravity delegate re-established — full detail (moved out of MEMORY.md, 2026-10-07)
+
+- [decision] Antigravity headless `agy.exe` delegate **re-established** after
+  the retirement rationale was disproven: the account lockouts were a
+  Google-side update bug, not bot-traffic flags from `agy.exe`; the accounts
+  were reopened and the CLI was never implicated (2026-10-06). Worker runs
+  through `tools/antigravity_delegate.py` — read-only by default, writes need
+  `--allow-dir` + `--auto-approve` with a shared-state directory lock and
+  post-run scope audit. Model is chosen by task complexity via the distinct ids
+  `gemini-3.8-flash-{low,medium,high}`. Quota rotation is manual: `agy.exe`
+  uses the machine-level Antigravity Google account and has no per-run account
+  flag; switch account with `/logout` then re-sign-in, check quota with `/usage`,
+  and resume with `--conversation <id>` or `--continue-latest`. A Gemini API key
+  (`modelProvider: "gemini"` + `GEMINI_API_KEY`) is the headless alternative.
