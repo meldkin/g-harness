@@ -70,15 +70,9 @@ High-signal context loaded at session start. Detailed history belongs in
   (`modelProvider: "gemini"` + `GEMINI_API_KEY`) is the headless alternative.
   Auth/settings details and doc links are in `decisions-archive.md`.
 - [decision] Antigravity headless permission behavior (measured 2026-10-06 on
-  `agy.exe` 1.2.9): a plain read-only run cannot answer the `command` permission
-  prompt, so `run_command` is auto-denied while `result.status` still says
-  `SUCCESS` with `denied_actions` populated. The wrapper now inspects
-  `denied_actions` and per-tool `ERROR` events and exits **5** (empty output
-  exits **2**) instead of a silent success. New `--allow-tools` flag grants
-  read/execute tool use without a write scope (no directory lock, no scope
-  audit); it is mutually exclusive with `--auto-approve`, `--allow-dir`, and
-  `--no-guardrail`. `view_file` works read-only with an absolute path;
-  `grep_search`/`list_dir` usage was unreliable at the low model tier.
+  `agy.exe` 1.2.9): the exit codes (5 on denied actions, 2 on empty output), the
+  `--allow-tools` flag and its mutual exclusions, and the `view_file` /
+  `grep_search` caveats are archived verbatim in `decisions-archive.md`.
 - [decision] OpenCode avoids duplicate skill mirrors and uses Claude-compatible
   skills.
 - [decision] Codex lifecycle and guard behavior is launcher-based, because Codex
@@ -108,16 +102,26 @@ High-signal context loaded at session start. Detailed history belongs in
   Pre-existing gaps still open, and the full finding list, are in
   `decisions-archive.md`. The checklist Pytest timeout rose 120s -> 300s (suite
   ~95-130s on Windows).
-- [decision] Six 0.0%-coverage tools given tests and the ratchet baseline raised
-  (check_skips 52.9%, solocode_config 66.3%, compaction 79.5%, harness_config
-  94.4%, codex_verify 95.2%, kilo_usage_report 98.2%). `pre-commit` is installed
-  and the git hook is active (2026-10-07).
+- [decision] Coverage (2026-10-07): every file that started at 0.0% (13 total)
+  now has tests and the ratchet baseline is raised. `pre-commit` is installed and
+  its git hook is active.
 - [decision] GUI worker console (2026-10-07): a stdlib-only local web app
   (`tools/gui_server.py` + `tools/gui/index.html`, test `tools/test_gui_server.py`)
   that discovers worker CLIs (agy/opencode/kilo/dsh/codex) + their wrappers, lists
   the provider/model catalog and `.env` key NAMES (never values), and runs a brief
   through the matching `*_delegate.py`. Loopback-only, per-run token, worker+model
   allowlist. Codex is wired too (`tools/codex_delegate.py`, read-only default).
+- [decision] Codex worker arm (2026-10-07): `tools/codex_delegate.py` runs Codex
+  through `codex-env.ps1` with a read-only sandbox by default (`--allow-write` ->
+  workspace-write; the dangerous flags are never emitted), writes the guardrail
+  brief to a file because the Windows npm shim truncates multi-line arguments, and
+  returns a post-run git status/diffstat. Codex has no project hooks, so
+  `tools/codex_guard.py` stays the separate preflight.
+- [decision] Subagent seam implemented (2026-10-07): `tools/subagent_cli.py` is
+  the Provider for the Protocol in `tools/subagent_seam.py` — a `CliProvider` over
+  the delegate wrappers (evidence split from summary) plus a capability/rank
+  dispatcher; `write` is deliberately not advertised. Harness version bumped to
+  4.3.0 across `.harness.lock`, `agent.yaml` and `pyproject.toml`.
 - [decision] Subagent reviewers hold `read` + `edit`, no shell for
   `code-reviewer`. Garden gained "Permission drift" (agent `permission:` block
   vs `.copilot`/`.gemini`) and "Agent tools drift" (derived `.claude` `tools:`);

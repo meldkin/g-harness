@@ -601,3 +601,16 @@ Still open (pre-existing; its own task, not this change):
 - divergence: only the Python guard scans command text for secrets, so
   `echo API_KEY='...'` blocks under Claude, not Kilo (Kilo's secret scan is a
   separate hook) -- architectural.
+
+## Antigravity headless permission behavior (moved out of MEMORY.md, 2026-10-07)
+
+- [decision] Antigravity headless permission behavior (measured 2026-10-06 on
+  `agy.exe` 1.2.9): a plain read-only run cannot answer the `command` permission
+  prompt, so `run_command` is auto-denied while `result.status` still says
+  `SUCCESS` with `denied_actions` populated. The wrapper now inspects
+  `denied_actions` and per-tool `ERROR` events and exits **5** (empty output
+  exits **2**) instead of a silent success. New `--allow-tools` flag grants
+  read/execute tool use without a write scope (no directory lock, no scope
+  audit); it is mutually exclusive with `--auto-approve`, `--allow-dir`, and
+  `--no-guardrail`. `view_file` works read-only with an absolute path;
+  `grep_search`/`list_dir` usage was unreliable at the low model tier.
