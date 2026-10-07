@@ -112,6 +112,12 @@ High-signal context loaded at session start. Detailed history belongs in
   (check_skips 52.9%, solocode_config 66.3%, compaction 79.5%, harness_config
   94.4%, codex_verify 95.2%, kilo_usage_report 98.2%). `pre-commit` is installed
   and the git hook is active (2026-10-07).
+- [decision] GUI worker console (2026-10-07): a stdlib-only local web app
+  (`tools/gui_server.py` + `tools/gui/index.html`, test `tools/test_gui_server.py`)
+  that discovers worker CLIs (agy/opencode/kilo/dsh/codex) + their wrappers, lists
+  the provider/model catalog and `.env` key NAMES (never values), and runs a brief
+  through the matching `*_delegate.py`. Loopback-only, per-run token, worker+model
+  allowlist. The Codex arm is shown pending a Codex delegate wrapper (plan P1.1).
 - [decision] Subagent reviewers hold `read` + `edit`, no shell for
   `code-reviewer`. Garden gained "Permission drift" (agent `permission:` block
   vs `.copilot`/`.gemini`) and "Agent tools drift" (derived `.claude` `tools:`);
