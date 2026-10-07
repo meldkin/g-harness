@@ -33,7 +33,7 @@ from pathlib import Path
 # as an xargs target. A bare `rm\s+` also matched `docker run --rm -v /var/...`
 # and `rg "rm /" .`, and blocked both. An over-block is worse than a miss here:
 # a guard that blocks routine work gets switched off.
-_RM_CMD = r"(?:^|[;&|\n]\s*|\bxargs\s+)rm\s+(?:--\s+)?"
+_RM_CMD = r"(?:^|[;&|\n]\s*|\bxargs\s+|\b(?:sudo|env|nice|nohup|command|time)\s+(?:\w+=\S*\s+)*)rm\s+(?:--\s+)?"
 # Only the flags that make an rm destructive, any order, and at least one of them.
 # `+` rather than `*` because a flagless `rm` cannot remove a directory: matching
 # zero flags made `rm *.tmp` and `rm /tmp/test.pid` look like recursive wipes.

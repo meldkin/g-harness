@@ -96,6 +96,11 @@ BLOCKED_COMMANDS = [
     "git reset --har HEAD",
     "rm -rf C:/",
     "rm -rf /c/",
+    # Command wrappers: guard.py's normalizer strips a leading `sudo`, gate-guard.js
+    # does not, so the anchored pattern itself has to accept the wrapper. Without
+    # this the two engines disagreed on `sudo rm -rf ~`.
+    "sudo rm -rf ~",
+    "env FOO=1 rm -rf /",
 ]
 
 
@@ -145,6 +150,56 @@ SAFE_COMMANDS = [
 @pytest.mark.parametrize("command", SAFE_COMMANDS)
 def test_safe_commands_allowed(command):
     assert _run_guard({"tool_name": "Bash", "tool_input": {"command": command}}) == 0
+
+
+# ── Engine parity: behaviour, not pattern names ──────────────────────────
+# The two guards are hand-mirrored (guard.py for Claude, gate-guard.js for Kilo).
+# Comparing NAME SETS is not enough: the same name can carry a divergent regex,
+# and JS escapes fail differently from Python raw strings (`'\s'` in a JS string
+# degrades to a literal `s`). An independent review made exactly this point, and
+# it had just found a real divergence in rm_relative_wildcard that a name
+# comparison would have passed. So both engines run the same corpus and must
+# agree, verdict for verdict.
+
+GATE_GUARD_JS = ROOT / ".kilo" / "hooks" / "pre-tool-use" / "gate-guard.js"
+
+PARITY_CORPUS: list[tuple[str, bool]] = [
+    *[(command, True) for command in BLOCKED_COMMANDS],
+    *[(command, False) for command in SAFE_COMMANDS],
+]
+
+
+def _run_gate_guard_js(command: str) -> int:
+    """Invoke the Kilo guard hook the way the host does; exit 2 means blocked."""
+    payload = {"tool_name": "Bash", "tool_input": {"command": command}}
+    proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
+        ["node", str(GATE_GUARD_JS)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+    )
+    return proc.returncode
+
+
+@pytest.mark.parametrize(
+    "command,expected_blocked",
+    PARITY_CORPUS,
+    ids=[f"{'blk' if b else 'alw'}-{c}" for c, b in PARITY_CORPUS],
+)
+def test_guard_engines_agree(command, expected_blocked):
+    python_blocked = (
+        _run_guard({"tool_name": "Bash", "tool_input": {"command": command}}) == 2
+    )
+    js_blocked = _run_gate_guard_js(command) == 2
+    assert js_blocked == python_blocked, (
+        f"engine divergence on {command!r}: "
+        f"guard.py={'block' if python_blocked else 'allow'} "
+        f"gate-guard.js={'block' if js_blocked else 'allow'}"
+    )
+    assert python_blocked == expected_blocked, (
+        f"guard.py {'blocked' if python_blocked else 'allowed'} {command!r}, "
+        f"expected {'BLOCK' if expected_blocked else 'allow'}"
+    )
 
 
 # ── Unquoted secrets (should BLOCK, exit 2) ──────────────────────────────

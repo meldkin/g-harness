@@ -29,7 +29,7 @@ const MAX_STDIN = 1024 * 1024;
 // as an xargs target. A bare `rm\s+` also matched `docker run --rm -v /var/...`
 // and `rg "rm /" .`, and blocked both. An over-block is worse than a miss here:
 // a guard that blocks routine work gets switched off.
-const RM_CMD = '(?:^|[;&|\\n]\\s*|\\bxargs\\s+)rm\\s+(?:--\\s+)?';
+const RM_CMD = '(?:^|[;&|\\n]\\s*|\\bxargs\\s+|\\b(?:sudo|env|nice|nohup|command|time)\\s+(?:\\w+=\\S*\\s+)*)rm\\s+(?:--\\s+)?';
 // At least one destructive flag (`+`, not `*`): a flagless `rm` cannot remove a
 // directory, and matching zero flags made `rm *.tmp` and `rm /tmp/test.pid`
 // look like recursive wipes.
