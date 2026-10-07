@@ -24,7 +24,7 @@ updated: 2026-08-03
 - Never commit `.env` files, credentials, or API keys.
 - Use environment variables for all secrets.
 - Run `python .github/scripts/security_scan.py .` before deployment.
-- `security-allowlist.txt` at `.github/scripts/` — every dangerous call must have a justification.
+- `security-allowlist.txt` at `.github/scripts/` — audit trail only; no tool reads it, so membership is not permission.
 
 ## Pull Requests
 
