@@ -110,6 +110,27 @@ def test_destructive_commands_blocked(command):
 
 
 # ── Safe commands (should ALLOW, exit 0) ─────────────────────────────────
+#
+# The policy boundary these two lists encode, because it is a judgement call and
+# a future reader will otherwise "fix" the deliberate allows:
+#
+#   BLOCK  catastrophic or irreversible: a filesystem/system root, a whole system
+#          tree, a database, a device, a force-push, or a wrapped one of those.
+#   ALLOW  routine, regenerable, or targeted: a build directory, node_modules,
+#          one file, one temp file, a container run, a feature-branch push.
+#
+# Blocking routine work is the measured failure mode: a guard that stops docker
+# and npm gets switched off, and then it stops nothing. An independent oracle
+# (Gemini 3.8 Flash high) reviewed this corpus blind and disagreed on 10 of 53
+# cases, every one of them a strictness difference rather than a defect -- it
+# wanted `rm *.tmp`, `rm /tmp/test.pid` and `docker run --rm -v ...` blocked. One
+# of its disagreements was a genuine error: it allowed `git reset --har HEAD`,
+# and `git reset --har` was measured to discard staged changes (exit 0), so the
+# BLOCK verdict stands.
+#
+# `--force-with-lease` is ALLOWED on purpose at both call sites, and is named here
+# so it is not "corrected" later: it is the alternative this harness recommends,
+# and the two guards' own hint text tells people to use it.
 
 SAFE_COMMANDS = [
     "ls -la",

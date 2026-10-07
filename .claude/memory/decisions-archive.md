@@ -492,3 +492,33 @@ Justification, in full:
   `.github/scripts/check_skips`, `.github/scripts/eval_harness`. A 0.0 floor is
   not a floor — the ratchet cannot detect a regression in any of them.
 
+## Guard policy boundary + oracle result (2026-10-07)
+
+Settled policy for the destructive-command guards (`.claude/hooks/guard.py` and
+`.kilo/hooks/pre-tool-use/gate-guard.js`), now also stated in the corpus comment in
+`tools/test_claude_guard.py`:
+
+- **BLOCK** catastrophic or irreversible: a filesystem/system root, a whole system
+  tree, a database, a device, a force-push (including the `+branch` refspec and
+  bundled `-fu`), or a `sudo`/`env`-wrapped one of those.
+- **ALLOW** routine, regenerable or targeted: a build directory, `node_modules`,
+  one file, one temp file, a container run, a feature-branch push.
+- `--force-with-lease` is deliberately ALLOWED at both call sites. It is the
+  alternative this harness recommends, and the guards' own hint text tells people
+  to use it. Do not "correct" this without changing that advice too.
+
+Evidence for the boundary: an independent oracle (Gemini 3.8 Flash high,
+generation-only, expected verdicts withheld) classified all 53 corpus commands
+blind. It disagreed on 10; all 10 were strictness differences, and one was an
+outright error (it allowed `git reset --har HEAD`, measured to discard staged
+changes with exit 0). It found no defect, so it neither validates the corpus nor
+replaces the behavioural parity test — it is recorded as the only independent
+check that the boundary is not merely self-consistent.
+
+Three rounds of guard defects were found in this series, and every round was found
+by an adversary rather than by the author: 9 over-blocks, then 8 more defects plus
+2 cross-engine divergences, then 10 oracle disagreements. The durable lesson:
+change a guard with tests in BOTH directions and a different model reviewing it,
+from the first commit.
+
+
