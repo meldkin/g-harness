@@ -79,8 +79,8 @@ def test_workers_ready_requires_cli_and_wrapper(tmp_path, monkeypatch):
     by_id = {w["id"]: w for w in mod.workers(tmp_path)}
     assert by_id["gemini"]["ready"] is True
     assert by_id["opencode"]["ready"] is False  # CLI present? no -> not ready
-    assert by_id["codex"]["ready"] is False  # note set (wrapper pending)
-    assert by_id["codex"]["note"]
+    assert by_id["codex"]["ready"] is False  # CLI not on PATH in this test
+    assert all(w["note"] is None for w in by_id.values())  # no worker is 'pending'
 
 
 # ── argv builder / validation (the security-relevant part) ───────────────────
@@ -127,18 +127,31 @@ def test_build_argv_kilo_and_dsh():
     ]
 
 
-def test_build_argv_rejects_pending_worker():
+def test_build_argv_codex_with_write():
+    mod = _load()
+    assert mod.build_argv("codex", "b", "gpt-6.1-sol", {"allow_write": True}) == [
+        sys.executable,
+        "tools/codex_delegate.py",
+        "b",
+        "--model",
+        "gpt-6.1-sol",
+        "--allow-write",
+    ]
+
+
+def test_build_argv_rejects_unknown_worker():
     mod = _load()
     with pytest.raises(ValueError):
-        mod.build_argv("codex", "b", None, {})
+        mod.build_argv("bogus", "b", None, {})
 
 
 def test_validate_run_accepts_and_rejects():
     mod = _load()
-    mod.validate_run("opencode", "x", None, set())
+    for worker in ("gemini", "opencode", "kilo", "dsh", "codex"):
+        mod.validate_run(worker, "x", None, set())
     mod.validate_run("gemini", "x", "prov/key", {"prov/key"})
     for args in (
-        ("codex", "x", None, set()),
+        ("bogus", "x", None, set()),
         ("opencode", "   ", None, set()),
         ("opencode", "x" * 25_000, None, set()),
         ("gemini", "x", "prov/nope", {"prov/key"}),
@@ -197,9 +210,9 @@ def test_run_rejects_non_runnable_worker(server):
     status, body = _call(
         port,
         "/api/run",
-        token="tok123",
+        token="tok123",  # noqa: S106 — test fixture
         method="POST",  # noqa: S106 — test fixture
-        payload={"worker": "codex", "brief": "x"},
+        payload={"worker": "bogus", "brief": "x"},
     )
     assert status == 400
     assert "not runnable" in body
@@ -220,7 +233,7 @@ def test_run_ok_with_mocked_runner(server, monkeypatch):
     status, body = _call(
         port,
         "/api/run",
-        token="tok123",
+        token="tok123",  # noqa: S106 — test fixture
         method="POST",  # noqa: S106 — test fixture
         payload={"worker": "opencode", "brief": "do x"},
     )

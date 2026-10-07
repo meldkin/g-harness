@@ -117,7 +117,7 @@ High-signal context loaded at session start. Detailed history belongs in
   that discovers worker CLIs (agy/opencode/kilo/dsh/codex) + their wrappers, lists
   the provider/model catalog and `.env` key NAMES (never values), and runs a brief
   through the matching `*_delegate.py`. Loopback-only, per-run token, worker+model
-  allowlist. The Codex arm is shown pending a Codex delegate wrapper (plan P1.1).
+  allowlist. Codex is wired too (`tools/codex_delegate.py`, read-only default).
 - [decision] Subagent reviewers hold `read` + `edit`, no shell for
   `code-reviewer`. Garden gained "Permission drift" (agent `permission:` block
   vs `.copilot`/`.gemini`) and "Agent tools drift" (derived `.claude` `tools:`);

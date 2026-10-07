@@ -55,13 +55,7 @@ _WORKER_SPEC: list[tuple[str, str, str, str, str | None]] = [
     ("opencode", "OpenCode / DeepSeek", "opencode", "tools/opencode_delegate.py", None),
     ("kilo", "Kilo CLI", "kilo", "tools/kilo_cli_delegate.py", None),
     ("dsh", "DeepSeek Harness (dsh)", "dsh", "tools/dsh_delegate.py", None),
-    (
-        "codex",
-        "Codex / ChatGPT",
-        "codex",
-        "tools/codex_delegate.py",
-        "wrapper chưa có (P1.1)",
-    ),
+    ("codex", "Codex / ChatGPT", "codex", "tools/codex_delegate.py", None),
 ]
 
 
@@ -149,6 +143,13 @@ def build_argv(
         return argv
     if worker == "dsh":
         return [py, "tools/dsh_delegate.py", brief]
+    if worker == "codex":
+        argv = [py, "tools/codex_delegate.py", brief]
+        if model:
+            argv += ["--model", model]
+        if flags.get("allow_write"):
+            argv.append("--allow-write")
+        return argv
     raise ValueError(f"worker not runnable: {worker!r}")
 
 

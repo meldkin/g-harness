@@ -70,6 +70,7 @@
     <div class="row" style="margin-top:8px">
       <label class="chip"><input type="checkbox" id="allow_tools" style="width:auto"> gemini: --allow-tools</label>
       <label class="chip"><input type="checkbox" id="free" style="width:auto"> opencode: --free</label>
+      <label class="chip"><input type="checkbox" id="allow_write" style="width:auto"> codex: --allow-write (mặc định read-only)</label>
       <div style="flex:1"></div>
       <label for="timeout" class="muted">timeout (s)</label>
       <input id="timeout" type="number" min="10" max="1800" value="300" style="width:90px">
@@ -151,7 +152,7 @@ async function run() {
   const worker = $("worker").value;
   const model = $("model").value || null;
   const brief = $("brief").value;
-  const flags = { allow_tools: $("allow_tools").checked, free: $("free").checked };
+  const flags = { allow_tools: $("allow_tools").checked, free: $("free").checked, allow_write: $("allow_write").checked };
   $("status").textContent = "đang chạy…";
   $("result").textContent = "";
   const t0 = Date.now();
