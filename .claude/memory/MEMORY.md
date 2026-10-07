@@ -100,7 +100,7 @@ High-signal context loaded at session start. Detailed history belongs in
   appear during a two-command probe. Use explicit `allow`/`deny`; never `ask`.
 - [decision] Guard hardening (2026-10-07): 33 -> 41 destructive patterns in
   `.claude/hooks/guard.py` + `.kilo/hooks/pre-tool-use/gate-guard.js`. Eight
-  verified holes closed; four independent Codex (gpt-6.1-sol) review rounds ran,
+  verified holes closed; independent Codex (gpt-6.1-sol) review rounds ran,
   and every self-inflicted regression they found was fixed (over-blocks on quoted
   searches / `./build` / `..`-named files; `bash -c` and wrapped-`curl|bash`
   divergences). New patterns anchor to command position, and Kilo gained a

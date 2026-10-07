@@ -579,3 +579,25 @@ scope for this change):
   `nohup git push … --force`, `curl … | env bash`
 - policy over-blocks kept by design: `rm -rf /tmp/<x>`, `rm -rf /var/log/<x>`,
   `Remove-Item -Recurse -Force <dir>` (pinned by the corpus)
+
+### Guard review rounds 5-6 (Codex, 2026-10-07)
+
+Fixed: anchored `diskpart`, `shutdown|reboot|halt`, `Format-Volume`,
+`Stop-Computer`, `Restart-Computer` to command position (over-blocks on
+`rg 'Format-Volume'` and on commit messages naming them); `rm_flags_after_target`
+now allows benign options around the target, and normalizeCommand unwraps
+`nohup|nice|command|time` (`rm -v / -rf`, `rm / --verbose -rf`,
+`nohup git push --force`); the curl pipe accepts `env [KEY=VAL...]`
+(`curl ... | env FOO=1 bash`).
+
+Still open (pre-existing; its own task, not this change):
+- `rg 'DROP TABLE' .` and `rg 'Remove-Item x -Recurse -Force' .` block a search
+  that only names them -- `drop_table` is deliberately unanchored so a quoted
+  `psql -c "DROP TABLE ..."` still blocks; `win_remove_recursive` is unanchored.
+- a separator inside quoted text is still read as executable:
+  `rg 'echo x; diskpart' .` blocks (a `[;&|]` anchor cannot tell quoted from real).
+- misses: `Remove-Item C:/ -Recurse` (root target), `rm -rf C:/Windows`
+  (Windows system trees are absent from rm_system_dir).
+- divergence: only the Python guard scans command text for secrets, so
+  `echo API_KEY='...'` blocks under Claude, not Kilo (Kilo's secret scan is a
+  separate hook) -- architectural.
