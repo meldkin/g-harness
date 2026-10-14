@@ -287,6 +287,70 @@ def test_run_cli_or_skip_turns_a_timeout_into_a_skip(monkeypatch):
         run_cli_or_skip(OPENCODE_CLI, "task")
 
 
+# ── Keyless coverage of the framework itself ─────────────────────────────────
+#
+# The real-API tests above self-skip without DEEPSEEK_API_KEY, so the helper
+# bodies (argv building, output parsing, the self-test runner and CLI entry)
+# would carry no coverage in a keyless gate run — a coverage ratchet keyed to
+# whatever key state the last run had. These unit tests exercise those paths
+# without a network call, which covers the helpers in either key state.
+#
+# They do NOT make the whole file key-invariant: the three real-API bodies
+# still execute only with a key, so this file measures 80% keyless and 89%
+# keyed (measured 2026-10-14). The budget must therefore stay at the keyless
+# (lower) number — a `--update` run from a keyed shell would record 89 and fail
+# the ratchet on every keyless run afterwards.
+
+
+def test_parse_opencode_output_extracts_a_json_line():
+    payload = {"choices": [{"text": "hi"}]}
+    assert parse_opencode_output(f"noise\n{json.dumps(payload)}\nmore") == payload
+
+
+def test_parse_opencode_output_ignores_non_json_lines():
+    assert parse_opencode_output("plain text\n{not json}\n") == {}
+
+
+def test_run_cli_builds_the_model_argv(monkeypatch):
+    seen: dict[str, list[str]] = {}
+
+    def fake_run(cmd, **_kwargs):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    run_cli(OPENCODE_CLI, "task", model="m1")
+    assert seen["cmd"][-2:] == ["--model", "m1"]
+
+
+def test_run_cli_builds_the_free_argv(monkeypatch):
+    seen: dict[str, list[str]] = {}
+
+    def fake_run(cmd, **_kwargs):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    run_cli(OPENCODE_CLI, "task", free=True)
+    assert seen["cmd"][-1] == "--free"
+
+
+def test_run_self_test_succeeds(capsys):
+    assert run_self_test() is True
+    assert "All self-tests passed" in capsys.readouterr().out
+
+
+def test_main_self_test_mode(monkeypatch):
+    monkeypatch.setattr(sys, "argv", [__file__, "--self-test"])
+    assert main() == 0
+
+
+def test_main_without_flag_prints_usage(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", [__file__])
+    assert main() == 1
+    assert "Usage" in capsys.readouterr().err
+
+
 # ── Self-Test (framework validation) ─────────────────────────────────────────
 
 
