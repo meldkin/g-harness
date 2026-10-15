@@ -49,6 +49,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+TOOLS_DIR = Path(__file__).resolve().parent
 DEFAULT_TIMEOUT_SECONDS = 600
 
 # Minimal environment variable names dsh reads for a real run.
@@ -63,6 +64,23 @@ PASSTHROUGH_ENVS = ("DEEPSEEK_BASE_URL",)
 
 def _stderr(message: str) -> None:
     print(f"[dsh_delegate] {message}", file=sys.stderr)
+
+
+def _load_sibling(module_name: str):
+    """Import a sibling tool (tools/ may not be on sys.path)."""
+    if str(TOOLS_DIR) not in sys.path:
+        sys.path.insert(0, str(TOOLS_DIR))
+    import importlib
+
+    return importlib.import_module(module_name)
+
+
+def _load_registry():
+    return _load_sibling("session_registry")
+
+
+def _load_control():
+    return _load_sibling("session_control")
 
 
 def _make_streams_encoding_safe() -> None:
@@ -139,24 +157,41 @@ def build_command(pnpm: str, profile: str, task: str) -> list[str]:
 def run_dsh(
     *, command: list[str], dsh_dir: Path, env: dict[str, str], timeout_s: int
 ) -> tuple[int, str, str]:
-    """Execute dsh and return (exit_code, stdout, stderr)."""
+    """Execute dsh, record the session, and return (exit_code, stdout, stderr)."""
+    registry = _load_registry()
     try:
-        proc = subprocess.run(  # noqa: S603 — argv built here, no shell
+        proc = subprocess.Popen(  # noqa: S603 — argv built here, no shell
             command,
             cwd=dsh_dir,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=timeout_s,
             env=env,
-            check=False,
         )
-    except subprocess.TimeoutExpired:
-        return 124, "", f"Timeout after {timeout_s}s"
-    except OSError as exc:
+    except OSError as exc:  # no pid exists yet, so there is no session to record
         return 1, "", str(exc)
-    return proc.returncode, proc.stdout or "", proc.stderr or ""
+
+    # The worker is `pnpm dsh ...`, so child_pid is the launcher; kill_tree walks
+    # down from it. The record follows Popen because the pid is what makes the run
+    # reachable from `session_control`.
+    run_id = registry.record_start("dsh", pid=proc.pid, argv=command, log_path=dsh_dir)
+
+    timed_out = False
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        _load_control().kill_tree(proc.pid)
+        stdout, stderr = proc.communicate()
+
+    registry.record_finish(
+        run_id, proc.returncode, state="timeout" if timed_out else "exited"
+    )
+    if timed_out:
+        return 124, "", f"Timeout after {timeout_s}s"
+    return proc.returncode, stdout or "", stderr or ""
 
 
 def _self_test() -> int:

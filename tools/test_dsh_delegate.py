@@ -13,7 +13,24 @@ from types import SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
+TOOLS = Path(__file__).resolve().parent
+for _entry in (str(ROOT), str(TOOLS)):
+    sys.path.insert(0, _entry)
+
 SCRIPT = ROOT / "tools" / "dsh_delegate.py"
+
+import session_registry  # noqa: E402
+
+
+def _registry():
+    """The registry module the delegate imports, so both share one object."""
+    return session_registry
+
+
+@pytest.fixture(autouse=True)
+def _registry_into_tmp(tmp_path, monkeypatch):
+    """No unit test may write session records into the repo's .solocode/."""
+    monkeypatch.setattr(session_registry, "SESSION_DIR", tmp_path)
 
 
 def _load():
@@ -93,12 +110,38 @@ def test_build_command_keeps_the_task_as_one_argument():
 # ── run_dsh ──────────────────────────────────────────────────────────────────
 
 
+class _FakePopen:
+    """A Popen stand-in: pid for the registry, communicate() for the streams."""
+
+    def __init__(
+        self,
+        stdout: str = "",
+        stderr: str = "",
+        returncode: int = 0,
+        pid: int = 6160,
+        timeout: bool = False,
+    ) -> None:
+        self.pid = pid
+        self.returncode = None
+        self._stdout = stdout
+        self._stderr = stderr
+        self._returncode = returncode
+        self._timeout = timeout
+
+    def communicate(self, timeout: int | None = None):
+        if self._timeout:
+            # One-shot: the timeout path kills the tree, so the next communicate()
+            # returns instead of raising again.
+            self._timeout = False
+            raise subprocess.TimeoutExpired(cmd="pnpm", timeout=timeout or 0)
+        self.returncode = self._returncode
+        return self._stdout, self._stderr
+
+
 def test_run_dsh_returns_streams(monkeypatch, tmp_path):
     mod = _load()
     monkeypatch.setattr(
-        mod.subprocess,
-        "run",
-        lambda *_a, **_k: SimpleNamespace(returncode=0, stdout="out", stderr=""),
+        mod.subprocess, "Popen", lambda *_a, **_k: _FakePopen(stdout="out")
     )
     assert mod.run_dsh(command=["pnpm"], dsh_dir=tmp_path, env={}, timeout_s=5) == (
         0,
@@ -109,15 +152,20 @@ def test_run_dsh_returns_streams(monkeypatch, tmp_path):
 
 def test_run_dsh_timeout_is_124(monkeypatch, tmp_path):
     mod = _load()
-
-    def boom(*_a, **_k):
-        raise subprocess.TimeoutExpired(cmd="pnpm", timeout=1)
-
-    monkeypatch.setattr(mod.subprocess, "run", boom)
+    killed: list[int] = []
+    monkeypatch.setattr(
+        mod,
+        "_load_control",
+        lambda: SimpleNamespace(kill_tree=lambda pid: killed.append(pid) or [pid]),
+    )
+    monkeypatch.setattr(
+        mod.subprocess, "Popen", lambda *_a, **_k: _FakePopen(timeout=True)
+    )
     code, _out, err = mod.run_dsh(
         command=["pnpm"], dsh_dir=tmp_path, env={}, timeout_s=1
     )
     assert code == 124 and "Timeout" in err
+    assert killed == [6160]  # the whole tree, not just the pnpm launcher
 
 
 def test_run_dsh_oserror_is_1(monkeypatch, tmp_path):
@@ -126,11 +174,56 @@ def test_run_dsh_oserror_is_1(monkeypatch, tmp_path):
     def boom(*_a, **_k):
         raise OSError("not launchable")
 
-    monkeypatch.setattr(mod.subprocess, "run", boom)
+    monkeypatch.setattr(mod.subprocess, "Popen", boom)
     code, _out, err = mod.run_dsh(
         command=["pnpm"], dsh_dir=tmp_path, env={}, timeout_s=1
     )
     assert code == 1 and "not launchable" in err
+
+
+# ── registry wiring (gap G7) ─────────────────────────────────────────────────
+
+
+def test_run_dsh_records_the_session(monkeypatch, tmp_path):
+    mod, registry = _load(), _registry()
+    monkeypatch.setattr(mod.subprocess, "Popen", lambda *_a, **_k: _FakePopen())
+    mod.run_dsh(command=["pnpm", "dsh"], dsh_dir=tmp_path, env={}, timeout_s=5)
+
+    sessions = registry.list_sessions(session_dir=tmp_path)
+    assert len(sessions) == 1
+    assert sessions[0]["worker"] == "dsh"
+    assert sessions[0]["pid"] == 6160
+    assert sessions[0]["state"] == "exited"
+
+
+def test_run_dsh_timeout_records_the_timeout(monkeypatch, tmp_path):
+    mod, registry = _load(), _registry()
+    monkeypatch.setattr(
+        mod, "_load_control", lambda: SimpleNamespace(kill_tree=lambda _p: [6160])
+    )
+    monkeypatch.setattr(
+        mod.subprocess, "Popen", lambda *_a, **_k: _FakePopen(timeout=True)
+    )
+    mod.run_dsh(command=["pnpm"], dsh_dir=tmp_path, env={}, timeout_s=1)
+    assert registry.list_sessions(session_dir=tmp_path)[0]["state"] == "timeout"
+
+
+def test_run_dsh_launch_failure_records_no_session(monkeypatch, tmp_path):
+    mod, registry = _load(), _registry()
+
+    def boom(*_a, **_k):
+        raise OSError("missing")
+
+    monkeypatch.setattr(mod.subprocess, "Popen", boom)
+    mod.run_dsh(command=["pnpm"], dsh_dir=tmp_path, env={}, timeout_s=1)
+    assert registry.list_sessions(session_dir=tmp_path) == []
+
+
+def test_the_sibling_loaders_resolve_the_real_modules():
+    """The loaders are monkeypatched in most tests, so call them once for real."""
+    mod = _load()
+    assert mod._load_registry().__name__ == "session_registry"
+    assert mod._load_control().__name__ == "session_control"
 
 
 # ── self-test / main ─────────────────────────────────────────────────────────
