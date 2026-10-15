@@ -32,6 +32,9 @@ RUNNING = "running"
 EXITED = "exited"
 STALE = "stale"
 INTERRUPTING = "interrupting"
+# Keeps .solocode/sessions bounded: records accumulate on their own, one per run
+# that drives a delegate, and nothing else trims them. See _enforce_retention.
+MAX_SETTLED_RECORDS = 200
 _ERROR_ACCESS_DENIED = 5
 _STILL_ACTIVE = 259
 _QUERY_LIMITED_INFORMATION = 0x1000
@@ -106,6 +109,30 @@ def _write_atomically(path: Path, payload: dict[str, object]) -> None:
     os.replace(tmp, path)
 
 
+def _enforce_retention(directory: Path) -> int:
+    """Drop the oldest settled records once their count exceeds the cap.
+
+    The bound lives here rather than in a cleanup step somebody must remember: the
+    files appear on their own, one per run that drives a delegate. Live records are
+    never candidates — a `running` file is the only handle the control plane has on
+    a session that is still going.
+    """
+    if MAX_SETTLED_RECORDS <= 0 or not directory.is_dir():
+        return 0
+    settled = [
+        session
+        for session in list_sessions(session_dir=directory)
+        if session.get("state") not in (RUNNING, INTERRUPTING)
+    ]
+    excess = len(settled) - MAX_SETTLED_RECORDS
+    if excess <= 0:
+        return 0
+    # list_sessions is newest first, so the tail holds the oldest records.
+    for session in settled[len(settled) - excess :]:
+        forget(str(session.get("run_id")), session_dir=directory)
+    return excess
+
+
 def record_start(
     worker: str,
     *,
@@ -124,6 +151,7 @@ def record_start(
     by the controller rather than looking reachable.
     """
     run_id = uuid.uuid4().hex[:12]
+    _enforce_retention(_session_dir(session_dir))
     _write_atomically(
         session_path(run_id, session_dir=session_dir),
         {

@@ -113,6 +113,69 @@ def test_an_abandoned_interrupting_record_also_settles_as_stale(tmp_path):
     assert mod.list_sessions(session_dir=tmp_path)[0]["state"] == "stale"
 
 
+# ── retention ────────────────────────────────────────────────────────────────
+
+
+def _old_record(mod, directory, run_id, stamp):
+    """An already-settled record. It says `exited`, so the cap cannot depend on
+    whether some fixed "fake" pid happens to be alive on the machine running it."""
+    mod._write_atomically(
+        directory / f"{run_id}.json",
+        {
+            "run_id": run_id,
+            "worker": "fake",
+            "pid": 4242,
+            "state": "exited",
+            "started_at": stamp,
+            "finished_at": stamp,
+        },
+    )
+
+
+def test_a_new_record_prunes_the_oldest_past_the_cap(tmp_path, monkeypatch):
+    mod = _load()
+    monkeypatch.setattr(mod, "MAX_SETTLED_RECORDS", 3)
+    for index in range(5):
+        _old_record(
+            mod, tmp_path, f"old{index}", f"2020-01-0{index + 1}T00:00:00+00:00"
+        )
+
+    fresh = mod.record_start("opencode", session_dir=tmp_path)
+
+    left = {s["run_id"] for s in mod.list_sessions(session_dir=tmp_path)}
+    assert fresh in left  # the new record always survives
+    # The cap keeps the three newest settled records and drops the two oldest.
+    assert left == {fresh, "old2", "old3", "old4"}
+
+
+def test_retention_never_drops_a_live_record(tmp_path, monkeypatch):
+    mod = _load()
+    monkeypatch.setattr(mod, "MAX_SETTLED_RECORDS", 1)
+    live = mod.record_start("opencode", pid=os.getpid(), session_dir=tmp_path)
+    for index in range(3):
+        _old_record(
+            mod, tmp_path, f"old{index}", f"2021-01-0{index + 1}T00:00:00+00:00"
+        )
+
+    mod.record_start("opencode", session_dir=tmp_path)
+
+    left = {s["run_id"] for s in mod.list_sessions(session_dir=tmp_path)}
+    assert live in left  # even though it is the oldest by timestamp
+    assert "old0" not in left and "old1" not in left  # pruned to the cap of one
+    assert len(left) == 3  # the live one, the new one, one settled survivor
+
+
+def test_retention_can_be_switched_off(tmp_path, monkeypatch):
+    mod = _load()
+    monkeypatch.setattr(mod, "MAX_SETTLED_RECORDS", 0)
+    for index in range(3):
+        _old_record(
+            mod, tmp_path, f"old{index}", f"2022-01-0{index + 1}T00:00:00+00:00"
+        )
+    mod.record_start("opencode", session_dir=tmp_path)
+    assert len(mod.list_sessions(session_dir=tmp_path)) == 4
+
+
 def test_list_skips_a_torn_or_foreign_file(tmp_path):
     mod = _load()
     (tmp_path / "torn.json").write_text("{not json", encoding="utf-8")
