@@ -6,14 +6,51 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+TOOLS = Path(__file__).resolve().parent
+for _entry in (str(ROOT), str(TOOLS)):
+    sys.path.insert(0, _entry)
+
+import session_registry  # noqa: E402
 
 from tools import antigravity_delegate, shared_state  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _registry_into_tmp(tmp_path, monkeypatch):
+    """No unit test may write session records into the repo's .solocode/."""
+    monkeypatch.setattr(session_registry, "SESSION_DIR", tmp_path)
+
+
+def _as_popen(completed_cls, pid: int = 8180):
+    """A Popen-shaped factory over the CompletedProcess-shaped fakes below.
+
+    The wrapper now keeps a pid and calls communicate(), so these tests exercise
+    the Popen seam; adapting here keeps each test's intent (streams, returncode)
+    unchanged.
+    """
+
+    def factory(*_args, **_kwargs):
+        process = completed_cls()
+        process.pid = pid
+        process.communicate = lambda timeout=None: (process.stdout, process.stderr)
+        return process
+
+    return factory
+
+
+def _recording_popen(seen: dict, completed_cls, pid: int = 8180):
+    """As above, but records the command it was asked to run."""
+
+    def factory(command, *_args, **_kwargs):
+        seen["command"] = command
+        return _as_popen(completed_cls, pid)()
+
+    return factory
 
 
 def test_parse_ndjson_events_collects_deltas_and_result():
@@ -61,7 +98,10 @@ def test_resolve_allowed_directory_rejects_path_outside_workspace(tmp_path):
     workspace.mkdir()
     (workspace / "src").mkdir()
 
-    assert antigravity_delegate.resolve_allowed_directory("src", workspace) == (workspace / "src", "src")
+    assert antigravity_delegate.resolve_allowed_directory("src", workspace) == (
+        workspace / "src",
+        "src",
+    )
     with pytest.raises(ValueError, match="inside --target-dir"):
         antigravity_delegate.resolve_allowed_directory("..", workspace)
     with pytest.raises(ValueError, match="narrower directory"):
@@ -72,13 +112,20 @@ def test_changed_workspace_paths_detects_create_modify_and_delete():
     before = {"a.py": "one", "gone.py": "old"}
     after = {"a.py": "two", "new.py": "new"}
 
-    assert antigravity_delegate.changed_workspace_paths(before, after) == ["a.py", "gone.py", "new.py"]
+    assert antigravity_delegate.changed_workspace_paths(before, after) == [
+        "a.py",
+        "gone.py",
+        "new.py",
+    ]
 
 
 def test_paths_outside_directory_uses_path_boundaries():
     paths = ["src/a.py", "src2/b.py", "README.md"]
 
-    assert antigravity_delegate.paths_outside_directory(paths, "src") == ["src2/b.py", "README.md"]
+    assert antigravity_delegate.paths_outside_directory(paths, "src") == [
+        "src2/b.py",
+        "README.md",
+    ]
     assert antigravity_delegate.paths_outside_directory(paths, ".") == []
 
 
@@ -137,7 +184,9 @@ def test_snapshot_detects_change_in_nested_build_dir(tmp_path):
     after = antigravity_delegate.snapshot_workspace(ws)
 
     changed = antigravity_delegate.changed_workspace_paths(before, after)
-    assert antigravity_delegate.paths_outside_directory(changed, "src") == ["docs/build/x.py"]
+    assert antigravity_delegate.paths_outside_directory(changed, "src") == [
+        "docs/build/x.py"
+    ]
 
 
 def _wire_main(monkeypatch, tmp_path):
@@ -175,7 +224,10 @@ def test_main_returns_two_on_worker_error(monkeypatch, tmp_path):
 
 def test_main_preserves_timeout_exit_code(monkeypatch, tmp_path):
     ws, _ = _wire_main(monkeypatch, tmp_path)
-    assert _run_main(monkeypatch, ws, ({"text": "", "error": "Timeout after 1s"}, 124)) == 124
+    assert (
+        _run_main(monkeypatch, ws, ({"text": "", "error": "Timeout after 1s"}, 124))
+        == 124
+    )
 
 
 def test_main_reports_scope_violation_before_worker_error(monkeypatch, tmp_path):
@@ -209,7 +261,9 @@ def test_main_rejects_whole_workspace_allow_dir(monkeypatch, tmp_path):
 
 def test_main_requires_allow_dir_with_auto_approve(tmp_path):
     with pytest.raises(SystemExit):
-        antigravity_delegate.main(["task", "--target-dir", str(tmp_path), "--auto-approve"])
+        antigravity_delegate.main(
+            ["task", "--target-dir", str(tmp_path), "--auto-approve"]
+        )
 
 
 def test_main_rejects_no_guardrail_with_auto_approve(tmp_path):
@@ -229,12 +283,35 @@ def test_main_rejects_no_guardrail_with_auto_approve(tmp_path):
 
 
 def test_run_agy_cli_maps_timeout_to_124(monkeypatch, tmp_path):
-    def raise_timeout(*args, **kwargs):
-        raise subprocess.TimeoutExpired("agy", 1)
+    class Completed:
+        returncode = 0
+        stdout = ""
+        stderr = ""
 
-    monkeypatch.setattr(antigravity_delegate.subprocess, "run", raise_timeout)
+    proc = _as_popen(Completed)()
+    calls = {"n": 0}
+
+    def communicate(timeout=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise subprocess.TimeoutExpired("agy", 1)
+        return "", ""
+
+    proc.communicate = communicate
+    monkeypatch.setattr(antigravity_delegate.subprocess, "Popen", lambda *a, **k: proc)
+    control_stub = SimpleNamespace(kill_tree=lambda pid: [pid])
+    monkeypatch.setattr(
+        antigravity_delegate,
+        "_load_sibling",
+        lambda name: control_stub if name == "session_control" else session_registry,
+    )
     result, code = antigravity_delegate.run_agy_cli(
-        prompt="p", model="m", target_dir=tmp_path, agy_binary="agy", skip_permissions=False, timeout_s=1
+        prompt="p",
+        model="m",
+        target_dir=tmp_path,
+        agy_binary="agy",
+        skip_permissions=False,
+        timeout_s=1,
     )
 
     assert code == 124
@@ -245,9 +322,14 @@ def test_run_agy_cli_maps_oserror_to_one(monkeypatch, tmp_path):
     def raise_oserror(*args, **kwargs):
         raise OSError("not found")
 
-    monkeypatch.setattr(antigravity_delegate.subprocess, "run", raise_oserror)
+    monkeypatch.setattr(antigravity_delegate.subprocess, "Popen", raise_oserror)
     _, code = antigravity_delegate.run_agy_cli(
-        prompt="p", model="m", target_dir=tmp_path, agy_binary="agy", skip_permissions=False, timeout_s=1
+        prompt="p",
+        model="m",
+        target_dir=tmp_path,
+        agy_binary="agy",
+        skip_permissions=False,
+        timeout_s=1,
     )
 
     assert code == 1
@@ -259,9 +341,14 @@ def test_run_agy_cli_keeps_nonzero_exit_code(monkeypatch, tmp_path):
         stdout = '{"event":"result","result":{"status":"SUCCESS","response":"ok"}}'
         stderr = ""
 
-    monkeypatch.setattr(antigravity_delegate.subprocess, "run", lambda *a, **k: Completed())
+    monkeypatch.setattr(antigravity_delegate.subprocess, "Popen", _as_popen(Completed))
     _, code = antigravity_delegate.run_agy_cli(
-        prompt="p", model="m", target_dir=tmp_path, agy_binary="agy", skip_permissions=True, timeout_s=5
+        prompt="p",
+        model="m",
+        target_dir=tmp_path,
+        agy_binary="agy",
+        skip_permissions=True,
+        timeout_s=5,
     )
 
     assert code == 3
@@ -275,11 +362,9 @@ def test_run_agy_cli_passes_conversation_id(monkeypatch, tmp_path):
         stdout = '{"event":"result","result":{"status":"SUCCESS","response":"ok"}}'
         stderr = ""
 
-    def capture(command, *args, **kwargs):
-        seen["command"] = command
-        return Completed()
-
-    monkeypatch.setattr(antigravity_delegate.subprocess, "run", capture)
+    monkeypatch.setattr(
+        antigravity_delegate.subprocess, "Popen", _recording_popen(seen, Completed)
+    )
     antigravity_delegate.run_agy_cli(
         prompt="p",
         model="m",
@@ -301,11 +386,9 @@ def test_run_agy_cli_continue_latest_takes_no_id(monkeypatch, tmp_path):
         stdout = '{"event":"result","result":{"status":"SUCCESS","response":"ok"}}'
         stderr = ""
 
-    def capture(command, *args, **kwargs):
-        seen["command"] = command
-        return Completed()
-
-    monkeypatch.setattr(antigravity_delegate.subprocess, "run", capture)
+    monkeypatch.setattr(
+        antigravity_delegate.subprocess, "Popen", _recording_popen(seen, Completed)
+    )
     antigravity_delegate.run_agy_cli(
         prompt="p",
         model="m",
@@ -335,7 +418,9 @@ def test_main_rejects_conversation_with_continue_latest(tmp_path):
 
 
 def test_find_agy_binary_prefers_path(monkeypatch):
-    monkeypatch.setattr(antigravity_delegate.shutil, "which", lambda name: "C:/bin/agy.exe")
+    monkeypatch.setattr(
+        antigravity_delegate.shutil, "which", lambda name: "C:/bin/agy.exe"
+    )
 
     assert antigravity_delegate.find_agy_binary() == "C:/bin/agy.exe"
 
@@ -353,7 +438,9 @@ def test_find_agy_binary_uses_local_app_data(monkeypatch, tmp_path):
 def test_find_agy_binary_returns_none_when_absent(monkeypatch, tmp_path):
     monkeypatch.setattr(antigravity_delegate.shutil, "which", lambda name: None)
     monkeypatch.delenv("LOCALAPPDATA", raising=False)
-    monkeypatch.setattr(antigravity_delegate.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(
+        antigravity_delegate.Path, "home", classmethod(lambda cls: tmp_path)
+    )
 
     assert antigravity_delegate.find_agy_binary() is None
 
@@ -371,8 +458,12 @@ def test_parse_ndjson_events_collects_denied_actions_and_tool_errors():
 
     result = antigravity_delegate.parse_ndjson_events(stream)
 
-    assert result["denied_actions"] == [{"action": "command", "display_name": "RunCommand"}]
-    assert result["tool_errors"] == [{"tool": "run_command", "message": "permission check failed"}]
+    assert result["denied_actions"] == [
+        {"action": "command", "display_name": "RunCommand"}
+    ]
+    assert result["tool_errors"] == [
+        {"tool": "run_command", "message": "permission check failed"}
+    ]
     assert result["error"] is None
 
 
@@ -394,13 +485,16 @@ def test_run_agy_cli_adds_skip_flag_when_requested(monkeypatch, tmp_path):
         stdout = '{"event":"result","result":{"status":"SUCCESS","response":"ok"}}'
         stderr = ""
 
-    def capture(command, *args, **kwargs):
-        seen["command"] = command
-        return Completed()
-
-    monkeypatch.setattr(antigravity_delegate.subprocess, "run", capture)
+    monkeypatch.setattr(
+        antigravity_delegate.subprocess, "Popen", _recording_popen(seen, Completed)
+    )
     antigravity_delegate.run_agy_cli(
-        prompt="p", model="m", target_dir=tmp_path, agy_binary="agy", skip_permissions=True, timeout_s=5
+        prompt="p",
+        model="m",
+        target_dir=tmp_path,
+        agy_binary="agy",
+        skip_permissions=True,
+        timeout_s=5,
     )
 
     assert "--dangerously-skip-permissions" in seen["command"]
@@ -421,30 +515,56 @@ def test_main_reports_empty_output_as_failure(monkeypatch, tmp_path):
 
 def test_main_allows_tools_without_allow_dir(monkeypatch, tmp_path):
     ws, _ = _wire_main(monkeypatch, tmp_path)
-    monkeypatch.setattr(antigravity_delegate, "run_agy_cli", lambda **kwargs: ({"text": "ok", "error": None}, 0))
+    monkeypatch.setattr(
+        antigravity_delegate,
+        "run_agy_cli",
+        lambda **kwargs: ({"text": "ok", "error": None}, 0),
+    )
 
-    assert antigravity_delegate.main(["task", "--target-dir", str(ws), "--allow-tools"]) == 0
+    assert (
+        antigravity_delegate.main(["task", "--target-dir", str(ws), "--allow-tools"])
+        == 0
+    )
 
 
 def test_main_rejects_allow_tools_with_auto_approve(tmp_path):
     (tmp_path / "src").mkdir()
     with pytest.raises(SystemExit):
         antigravity_delegate.main(
-            ["task", "--target-dir", str(tmp_path), "--allow-tools", "--allow-dir", "src", "--auto-approve"]
+            [
+                "task",
+                "--target-dir",
+                str(tmp_path),
+                "--allow-tools",
+                "--allow-dir",
+                "src",
+                "--auto-approve",
+            ]
         )
 
 
 def test_main_rejects_allow_dir_without_auto_approve(tmp_path):
     (tmp_path / "src").mkdir()
     with pytest.raises(SystemExit):
-        antigravity_delegate.main(["task", "--target-dir", str(tmp_path), "--allow-tools", "--allow-dir", "src"])
+        antigravity_delegate.main(
+            [
+                "task",
+                "--target-dir",
+                str(tmp_path),
+                "--allow-tools",
+                "--allow-dir",
+                "src",
+            ]
+        )
 
 
 def test_main_rejects_bare_allow_dir_without_auto_approve(tmp_path):
     """--allow-dir alone is a no-op write scope; it must be rejected, not ignored."""
     (tmp_path / "src").mkdir()
     with pytest.raises(SystemExit):
-        antigravity_delegate.main(["task", "--target-dir", str(tmp_path), "--allow-dir", "src"])
+        antigravity_delegate.main(
+            ["task", "--target-dir", str(tmp_path), "--allow-dir", "src"]
+        )
 
 
 def test_make_streams_encoding_safe_relaxes_errors(monkeypatch):
@@ -473,7 +593,9 @@ def test_make_streams_encoding_safe_tolerates_missing_reconfigure(monkeypatch):
 
 
 def test_looks_like_quota_error_matches_markers():
-    assert antigravity_delegate._looks_like_quota_error("RESOURCE_EXHAUSTED: quota exceeded")
+    assert antigravity_delegate._looks_like_quota_error(
+        "RESOURCE_EXHAUSTED: quota exceeded"
+    )
     assert antigravity_delegate._looks_like_quota_error("429 Too Many Requests")
     assert antigravity_delegate._looks_like_quota_error("You have hit the rate limit")
     assert not antigravity_delegate._looks_like_quota_error("file not found")
@@ -481,6 +603,9 @@ def test_looks_like_quota_error_matches_markers():
 
 def test_main_reports_quota_exhaustion_as_exit_six(monkeypatch, tmp_path):
     ws, _ = _wire_main(monkeypatch, tmp_path)
-    result = ({"text": "", "error": "RESOURCE_EXHAUSTED: quota exceeded", "stderr": ""}, 2)
+    result = (
+        {"text": "", "error": "RESOURCE_EXHAUSTED: quota exceeded", "stderr": ""},
+        2,
+    )
 
     assert _run_main(monkeypatch, ws, result) == 6
