@@ -32,6 +32,7 @@ Auth: opencode providers login <url>
 
 import argparse
 import contextlib
+import importlib
 import json
 import shutil
 import subprocess
@@ -77,6 +78,26 @@ Your permission scope was frozen when this task was created and cannot be expand
 def _stderr(msg: str) -> None:
     """Print to stderr with [opencode_delegate] prefix."""
     print(f"[opencode_delegate] {msg}", file=sys.stderr)
+
+
+def _load_sibling(module_name: str):
+    """Import a sibling tool (tools/ may not be on sys.path)."""
+    tools_dir = str(Path(__file__).resolve().parent)
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+    return importlib.import_module(module_name)
+
+
+def _error_result(error: str) -> dict[str, Any]:
+    """The shaped empty result every failure path in this module returns."""
+    return {
+        "text": "",
+        "events": [],
+        "session_id": None,
+        "tokens": None,
+        "cost": None,
+        "error": error,
+    }
 
 
 def _make_streams_encoding_safe() -> None:
@@ -234,55 +255,60 @@ def run_opencode_cli(
 
     _stderr(f"Running: opencode run ... --model {model} --format json --auto")
 
+    registry = _load_sibling("session_registry")
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(  # noqa: S603 — fixed argv; the prompt is data
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=timeout_s,
-            check=False,
             cwd=directory,
         )
-
-        if proc.returncode != 0 and not proc.stdout.strip():
-            # No JSON output, likely binary error
-            _stderr(f"opencode CLI failed with exit code {proc.returncode}")
-            if proc.stderr:
-                _stderr(f"stderr: {proc.stderr[:500]}")
-            return {
-                "text": "",
-                "events": [],
-                "session_id": None,
-                "tokens": None,
-                "cost": None,
-                "error": f"opencode CLI exit code {proc.returncode}",
-            }
-
-        # Parse JSON events from stdout
-        return parse_json_events(proc.stdout)
-
-    except subprocess.TimeoutExpired:
-        _stderr(f"opencode CLI timed out after {timeout_s}s")
-        return {
-            "text": "",
-            "events": [],
-            "session_id": None,
-            "tokens": None,
-            "cost": None,
-            "error": f"Timeout after {timeout_s}s",
-        }
-    except Exception as exc:
+    except Exception as exc:  # no pid exists yet, so there is no session to record
         _stderr(f"opencode CLI failed: {exc}")
-        return {
-            "text": "",
-            "events": [],
-            "session_id": None,
-            "tokens": None,
-            "cost": None,
-            "error": str(exc),
-        }
+        return _error_result(str(exc))
+
+    # The pid is what makes the session interruptible later, which is why the
+    # record is written only after Popen succeeded and carries proc.pid.
+    run_id = registry.record_start("opencode", model=model, pid=proc.pid, argv=cmd)
+
+    timed_out = False
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        # Kill the worker's whole tree, not just the direct child: a node worker
+        # keeps children of its own, and a bare kill() would leave them running
+        # past the timeout this call claims to enforce.
+        _load_sibling("session_control").kill_tree(proc.pid)
+        stdout, stderr = proc.communicate()
+    except Exception as exc:
+        registry.record_finish(run_id, None, state="failed")
+        _stderr(f"opencode CLI failed: {exc}")
+        return _error_result(str(exc))
+
+    exit_code = proc.returncode
+    # record_finish refuses to overwrite a state the controller already set, so a
+    # session the operator interrupted keeps that verdict instead of `exited`.
+    registry.record_finish(
+        run_id, exit_code, state="timeout" if timed_out else "exited"
+    )
+
+    if timed_out:
+        _stderr(f"opencode CLI timed out after {timeout_s}s")
+        return _error_result(f"Timeout after {timeout_s}s")
+
+    if exit_code != 0 and not stdout.strip():
+        # No JSON output: the CLI failed before it could emit anything.
+        _stderr(f"opencode CLI failed with exit code {exit_code}")
+        if stderr:
+            _stderr(f"stderr: {stderr[:500]}")
+        return _error_result(f"opencode CLI exit code {exit_code}")
+
+    # Parse JSON events from stdout
+    return parse_json_events(stdout)
 
 
 def log_usage(

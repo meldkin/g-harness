@@ -72,12 +72,45 @@ def test_record_finish_on_an_unknown_run_id_is_false(tmp_path):
     assert mod.record_finish("nosuchrun", 0, session_dir=tmp_path) is False
 
 
+def test_record_finish_refuses_to_overwrite_a_settled_state(tmp_path):
+    """The controller's verdict outranks the delegate that finishes afterwards."""
+    mod = _load()
+    run_id = mod.record_start("opencode", session_dir=tmp_path)
+    assert mod.record_finish(run_id, None, state="interrupted", session_dir=tmp_path)
+
+    assert mod.record_finish(run_id, 0, session_dir=tmp_path) is False
+    settled = mod.list_sessions(session_dir=tmp_path)[0]
+    assert settled["state"] == "interrupted"
+    assert settled["exit_code"] is None  # the losing writer changed nothing
+
+
+def test_record_finish_can_be_forced_when_the_caller_means_it(tmp_path):
+    mod = _load()
+    run_id = mod.record_start("opencode", session_dir=tmp_path)
+    mod.record_finish(run_id, None, state="interrupted", session_dir=tmp_path)
+    assert (
+        mod.record_finish(
+            run_id, 7, state="exited", only_if_running=False, session_dir=tmp_path
+        )
+        is True
+    )
+    assert mod.list_sessions(session_dir=tmp_path)[0]["exit_code"] == 7
+
+
 def test_a_dead_pid_reports_stale_not_running(tmp_path):
     mod = _load()
     run_id = mod.record_start("codex", pid=_dead_pid(), session_dir=tmp_path)
     session = mod.list_sessions(session_dir=tmp_path)[0]
     assert session["run_id"] == run_id
     assert session["state"] == "stale"
+
+
+def test_an_abandoned_interrupting_record_also_settles_as_stale(tmp_path):
+    """A controller that dies mid-interrupt must not leave a live-looking record."""
+    mod = _load()
+    run_id = mod.record_start("opencode", pid=_dead_pid(), session_dir=tmp_path)
+    mod.record_finish(run_id, None, state="interrupting", session_dir=tmp_path)
+    assert mod.list_sessions(session_dir=tmp_path)[0]["state"] == "stale"
 
 
 def test_list_skips_a_torn_or_foreign_file(tmp_path):

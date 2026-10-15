@@ -15,14 +15,28 @@ Usage:
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+TOOLS = Path(__file__).resolve().parent
+for _entry in (str(ROOT), str(TOOLS)):
+    if _entry not in sys.path:
+        sys.path.insert(0, _entry)
+
+import session_control  # noqa: E402
+import session_registry  # noqa: E402
 
 from tools import opencode_delegate  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _registry_into_tmp(tmp_path, monkeypatch):
+    """No unit test may write session records into the repo's .solocode/."""
+    monkeypatch.setattr(session_registry, "SESSION_DIR", tmp_path)
 
 
 def test_prefer_real_executable_ignores_retired_v1_package(tmp_path):
@@ -104,19 +118,41 @@ def test_parse_json_events_captures_error():
 
 
 class _FakeProc:
-    returncode = 0
-    stdout = ""
-    stderr = ""
+    """A Popen stand-in: the delegate keeps the pid and later talks to communicate()."""
+
+    def __init__(
+        self,
+        stdout: str = "",
+        stderr: str = "",
+        returncode: int = 0,
+        pid: int = 4242,
+        timeout: bool = False,
+    ) -> None:
+        self.pid = pid
+        self.returncode = None
+        self._stdout = stdout
+        self._stderr = stderr
+        self._returncode = returncode
+        self._timeout = timeout
+
+    def communicate(self, timeout: int | None = None):
+        if self._timeout:
+            # One-shot: in a real run the timeout path kills the tree, so the next
+            # communicate() returns instead of raising again.
+            self._timeout = False
+            raise subprocess.TimeoutExpired(cmd="opencode", timeout=timeout or 0)
+        self.returncode = self._returncode
+        return self._stdout, self._stderr
 
 
 def test_run_opencode_cli_passes_agent_and_session(monkeypatch, tmp_path):
     captured: dict = {}
 
-    def fake_run(cmd, **_kwargs):
+    def fake_popen(cmd, **_kwargs):
         captured["cmd"] = cmd
         return _FakeProc()
 
-    monkeypatch.setattr(opencode_delegate.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_delegate.subprocess, "Popen", fake_popen)
     opencode_delegate.run_opencode_cli(
         prompt="do x",
         model="commandcode/deepseek-v4.1-flash",
@@ -133,11 +169,11 @@ def test_run_opencode_cli_passes_agent_and_session(monkeypatch, tmp_path):
 def test_run_opencode_cli_omits_agent_and_session_by_default(monkeypatch, tmp_path):
     captured: dict = {}
 
-    def fake_run(cmd, **_kwargs):
+    def fake_popen(cmd, **_kwargs):
         captured["cmd"] = cmd
         return _FakeProc()
 
-    monkeypatch.setattr(opencode_delegate.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_delegate.subprocess, "Popen", fake_popen)
     opencode_delegate.run_opencode_cli(
         prompt="x",
         model="m",
@@ -146,3 +182,61 @@ def test_run_opencode_cli_omits_agent_and_session_by_default(monkeypatch, tmp_pa
     )
     assert "--agent" not in captured["cmd"]
     assert "--session" not in captured["cmd"]
+
+
+# ── registry wiring (gap G7) ─────────────────────────────────────────────────
+
+
+def test_run_records_the_session_and_settles_it(monkeypatch, tmp_path):
+    stream = '{"type":"text","part":{"text":"PONG"}}'
+    monkeypatch.setattr(
+        opencode_delegate.subprocess, "Popen", lambda cmd, **k: _FakeProc(stdout=stream)
+    )
+    result = opencode_delegate.run_opencode_cli(
+        prompt="x",
+        model="commandcode/deepseek-v4.1-flash",
+        directory=str(tmp_path),
+        opencode_binary="opencode",
+    )
+    assert result["text"] == "PONG"
+
+    sessions = session_registry.list_sessions(session_dir=tmp_path)
+    assert len(sessions) == 1
+    assert sessions[0]["worker"] == "opencode"
+    assert (
+        sessions[0]["pid"] == 4242
+    )  # the worker's pid, which makes interrupt possible
+    assert sessions[0]["state"] == "exited"
+    assert sessions[0]["exit_code"] == 0
+
+
+def test_run_timeout_kills_the_tree_and_records_the_timeout(monkeypatch, tmp_path):
+    killed: list[int] = []
+    monkeypatch.setattr(
+        session_control, "kill_tree", lambda pid: killed.append(pid) or [pid]
+    )
+    monkeypatch.setattr(
+        opencode_delegate.subprocess, "Popen", lambda cmd, **k: _FakeProc(timeout=True)
+    )
+    result = opencode_delegate.run_opencode_cli(
+        prompt="x",
+        model="m",
+        directory=str(tmp_path),
+        opencode_binary="opencode",
+        timeout_s=5,
+    )
+    assert result["error"] == "Timeout after 5s"
+    assert killed == [4242]  # the whole tree, not just the direct child
+    assert session_registry.list_sessions(session_dir=tmp_path)[0]["state"] == "timeout"
+
+
+def test_a_launch_failure_records_no_session(monkeypatch, tmp_path):
+    def boom(*_a, **_k):
+        raise OSError("no such binary")
+
+    monkeypatch.setattr(opencode_delegate.subprocess, "Popen", boom)
+    result = opencode_delegate.run_opencode_cli(
+        prompt="x", model="m", directory=str(tmp_path), opencode_binary="absent"
+    )
+    assert result["error"] == "no such binary"
+    assert session_registry.list_sessions(session_dir=tmp_path) == []

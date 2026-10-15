@@ -31,6 +31,7 @@ SESSION_DIR = ROOT / ".solocode" / "sessions"
 RUNNING = "running"
 EXITED = "exited"
 STALE = "stale"
+INTERRUPTING = "interrupting"
 _ERROR_ACCESS_DENIED = 5
 _STILL_ACTIVE = 259
 _QUERY_LIMITED_INFORMATION = 0x1000
@@ -148,15 +149,23 @@ def record_finish(
     exit_code: int | None,
     *,
     state: str = EXITED,
+    only_if_running: bool = True,
     session_dir: str | Path | None = None,
 ) -> bool:
-    """Settle a record. False when there is nothing to settle (unknown run id)."""
+    """Settle a record. False when there is nothing to settle, or it is settled.
+
+    ``only_if_running`` defaults on because two writers race on the same file: the
+    controller may already have marked the session `interrupted`, and a delegate
+    finishing afterwards must not replace that verdict with `exited`.
+    """
     path = session_path(run_id, session_dir=session_dir)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
     if not isinstance(payload, dict):
+        return False
+    if only_if_running and payload.get("state") != RUNNING:
         return False
     payload["exit_code"] = exit_code
     payload["finished_at"] = _now()
@@ -184,8 +193,9 @@ def list_sessions(*, session_dir: str | Path | None = None) -> list[dict[str, ob
 
 
 def _settle(payload: dict[str, object]) -> dict[str, object]:
-    """Report `stale` for a record that claims to be running under a dead pid."""
+    """Report `stale` for a record that claims to be live under a dead pid."""
     pid = payload.get("pid")
-    if payload.get("state") == RUNNING and isinstance(pid, int) and not pid_alive(pid):
+    state = payload.get("state")
+    if state in (RUNNING, INTERRUPTING) and isinstance(pid, int) and not pid_alive(pid):
         return {**payload, "state": STALE}
     return payload

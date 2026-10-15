@@ -110,6 +110,28 @@ def test_interrupt_kills_the_whole_tree(mods, tmp_path):
         _force_cleanup(control, [proc.pid, grandchild])
 
 
+def test_interrupt_claims_the_record_before_killing(mods, tmp_path, monkeypatch):
+    """The claim is what makes the verdict survive the delegate finishing later."""
+    registry, control = mods
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    run_id = registry.record_start("fake", pid=proc.pid, session_dir=tmp_path)
+    seen: dict = {}
+    real_kill = control.kill_tree
+
+    def spy(pid):
+        seen["state"] = registry.list_sessions(session_dir=tmp_path)[0]["state"]
+        return real_kill(pid)
+
+    monkeypatch.setattr(control, "kill_tree", spy)
+    try:
+        result = control.interrupt(run_id, session_dir=tmp_path)
+        assert seen["state"] == "interrupting"  # claimed before the kill
+        assert result["killed"] is True
+        assert registry.list_sessions(session_dir=tmp_path)[0]["state"] == "interrupted"
+    finally:
+        _force_cleanup(control, [proc.pid])
+
+
 def test_interrupt_reports_an_already_exited_session(mods, tmp_path):
     registry, control = mods
     proc = subprocess.Popen([sys.executable, "-c", "pass"])

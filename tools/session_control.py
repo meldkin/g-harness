@@ -124,12 +124,21 @@ def interrupt(
             "reason": "already exited",
         }
 
+    # Claim the session before killing it. The delegate's communicate() returns the
+    # moment the worker dies, so both writers would otherwise race to settle one
+    # record; whichever wrote first would win, and the delegate's `exited` would
+    # hide that an operator interrupted the run.
+    session_registry.record_finish(
+        run_id, None, state=session_registry.INTERRUPTING, session_dir=session_dir
+    )
+
     signalled = kill_tree(pid)
     gone = wait_for_exit(pid)
     session_registry.record_finish(
         run_id,
         None,
         state="interrupted" if gone else "interrupt-failed",
+        only_if_running=False,  # the record is `interrupting`, claimed just above
         session_dir=session_dir,
     )
     return {
