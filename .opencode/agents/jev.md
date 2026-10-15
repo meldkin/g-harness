@@ -99,13 +99,17 @@ pick the cheapest worker that can finish it, then verify the result.
 | Read >5 files, repo-wide survey, independent review | **Gemini / Antigravity CLI** | `python tools/antigravity_delegate.py "<task>" --allow-tools --model gemini-3.8-flash-medium` |
 | Independent review of a diff, or a second opinion | **Codex / ChatGPT** | `python tools/codex_delegate.py "<task>"` (read-only sandbox by default) |
 | Small mechanical edit, boilerplate, one test | **OpenCode CLI** | `python tools/opencode_delegate.py "<task>"` |
-| DeepSeek-native, heavier runs | **dsh** (unverified) | `python tools/dsh_delegate.py "<task>"` |
+| DeepSeek-native, heavier runs | **dsh** (verified 2026-10-07) | `python tools/dsh_delegate.py "<task>"` |
 | Architecture, product, security decision | **Here** | Judgment is not delegable |
 
 The OpenCode wrapper also reaches the DeepSeek **strong** tier with
 `--model commandcode/deepseek-v4-pro`. Pick the Antigravity tier by complexity:
 `gemini-3.8-flash-low` (mechanical), `medium` (default multi-file), `high` (hard
 reasoning).
+
+A live `dsh` run still needs its environment set up: `CI=true`, a one-time
+`pnpm build` in the checkout, and no exported `DEEPSEEK_BASE_URL` (dsh uses its
+own messages endpoint). `decisions-archive.md` records the prerequisites.
 
 **Mechanism note.** The runtime exposes a `subagent` tool for the review agents
 under `permission.task` (they are `mode: subagent`). `solo-code-engineer` is a
