@@ -90,12 +90,8 @@ High-signal context loaded at session start. Detailed history belongs in
 - [decision] Coverage (2026-10-07): every file that started at 0.0% (13 total)
   now has tests and the ratchet baseline is raised. `pre-commit` is installed and
   its git hook is active.
-- [decision] GUI worker console (2026-10-07): a stdlib-only local web app
-  (`tools/gui_server.py` + `tools/gui/index.html`, test `tools/test_gui_server.py`)
-  that discovers worker CLIs (agy/opencode/kilo/dsh/codex) + their wrappers, lists
-  the provider/model catalog and `.env` key NAMES (never values), and runs a brief
-  through the matching `*_delegate.py`. Loopback-only, per-run token, worker+model
-  allowlist. Codex is wired too (`tools/codex_delegate.py`, read-only default).
+- [decision] GUI worker console (2026-10-07): full detail in `decisions-archive.md`
+  (loopback-only stdlib web app in `tools/gui_server.py`, `.env` key NAMES only).
 - [decision] dsh worker verified (2026-10-07): `tools/dsh_delegate.py` drives dsh
   end to end; the setup prerequisites and the two bugs it surfaced (UTF-8 output,
   and the `.env` base URL being wrong for dsh's messages protocol) are recorded
@@ -116,9 +112,12 @@ High-signal context loaded at session start. Detailed history belongs in
   vs `.copilot`/`.gemini`) and "Agent tools drift" (derived `.claude` `tools:`);
   the old `check_agents` compared filenames only and reported clean while the
   engines disagreed (2026-10-07).
-- [decision] Worker confinement (2026-10-14): `tools/win_sandbox.py` confines a
-  worker subtree with a Windows ACL restricted token; verified by 4 probes +
-  `icacls` and 31 tests. **Not wired** — no delegate/console calls it yet, so G5 is
-  a mechanism, not enforcement. `revert --workspace|--temp` drops the standing
-  capability ACE a run leaves behind. Gotcha: a CLI path exercised only via
-  subprocess is invisible to coverage. Budget: keep the keyless `test_e2e` number.
+- [decision] Worker confinement mechanism (2026-10-14): `tools/win_sandbox.py` —
+  Windows ACL restricted token, `--also-write` để cấp thêm root ghi, `revert` để gỡ
+  ACE; verify bằng `icacls`. Gotcha: đường CLI chỉ chạy qua subprocess thì coverage
+  không thấy. Budget: giữ số keyless của `test_e2e`.
+- [decision] G5 dừng ở nhánh restricted-token (2026-10-15): `win_sandbox.py` chặn
+  ghi đúng (40 test) **nhưng HTTPS/TLS fail dưới token hạn chế**
+  (`SEC_E_NO_CREDENTIALS`) ⇒ không bọc được worker nào của fleet (mọi worker gọi
+  API). `--confine` trong `codex_delegate` bị chặn có chủ ý; nếu cần cách ly →
+  AppContainer (chưa làm). Việc kế: G7/P2.2 (spec `plan.md` §4.1).

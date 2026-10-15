@@ -664,3 +664,12 @@ found was fixed (over-blocks on quoted searches / `./build` / `..`-named files;
 position, and Kilo gained a `normalizeCommand` port so both engines unwrap
 `sudo`/`env`/`bash -c` alike. Pre-existing gaps still stay open; the full finding
 list is the "Guard hardening: full finding list" section above.
+
+## GUI worker console (moved out of MEMORY.md, 2026-10-15)
+
+A stdlib-only local web app (`tools/gui_server.py` + `tools/gui/index.html`, test
+`tools/test_gui_server.py`) that discovers worker CLIs (agy/opencode/kilo/dsh/codex)
+plus their wrappers, lists the provider/model catalog and `.env` key NAMES (never
+values), and runs a brief through the matching `*_delegate.py`. Loopback-only,
+per-run token, worker+model allowlist. Codex is wired too
+(`tools/codex_delegate.py`, read-only default).
