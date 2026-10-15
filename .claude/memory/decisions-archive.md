@@ -652,7 +652,36 @@ Two fixes came out of the real run:
   `https://api.deepseek.com/anthropic`. The base URL is no longer taken from
   `.env`; it passes through only from the process environment.
 
-Result: a real run returned the exact marker `DSH_E2E_OK` with exit 0.
+## CommandCode model ids and consumers (moved out of MEMORY.md, 2026-10-16)
+
+Verify ids against `GET {COMMANDCODE_BASE_URL}/models`, never from memory: the catalog
+drifts and the old `api-providers.md` advertised nine ids that no longer resolve. Each
+CommandCode consumer declares models separately, so a new model needs one entry in
+`tools/opencode_engine.py` `_PROVIDER_MODELS` (OpenCode), `.vscode/settings.json`
+(Copilot), and `~/.config/kilo/kilo.jsonc` (Kilo). Kilo refs use the full upstream id
+(`commandcode/deepseek/deepseek-v4-pro`) while OpenCode refs use the harness key
+(`commandcode/deepseek-v4-pro`) — both correct for their dialect. `context_length` comes
+from the response, not the file. (2026-09-28)
+
+## Antigravity headless permission behavior (moved out of MEMORY.md, 2026-10-16)
+
+Measured 2026-10-06 on `agy.exe` 1.2.9: exit code 5 on denied actions, 2 on empty output;
+`--allow-tools` and its mutual exclusions with `--auto-approve`/`--allow-dir`/`--no-guardrail`;
+and the `view_file` / `grep_search` caveats.
+
+## Codex worker arm (moved out of MEMORY.md, 2026-10-16)
+
+`tools/codex_delegate.py` runs Codex through `codex-env.ps1` with a read-only sandbox
+by default (`--allow-write` -> workspace-write; the dangerous flags are never emitted),
+writes the guardrail brief to a file because the Windows npm shim truncates multi-line
+arguments, and returns a post-run git status/diffstat. Codex has no project hooks, so
+`tools/codex_guard.py` stays the separate preflight.
+
+Its brief moved from `%TEMP%` into `.solocode/codex-briefs/` on 2026-10-16, because
+Codex's own sandbox denies reads outside the workspace ("denied by the filesystem
+restrictions") and the worker never saw the task. Model and reasoning effort are
+explicit: `-m gpt-6.1-sol` and `-c model_reasoning_effort="medium"`, overridable per
+call with `--model` / `--effort low|medium|high`.
 
 ## Guard hardening summary (moved out of MEMORY.md, 2026-10-15)
 

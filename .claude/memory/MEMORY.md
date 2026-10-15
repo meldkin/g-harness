@@ -61,10 +61,8 @@ High-signal context loaded at session start. Detailed history belongs in
   `--allow-dir` + `--auto-approve` with a shared-state lock and scope audit), tiers
   `gemini-3.8-flash-{low,medium,high}`. Quota rotation and auth details are in
   `decisions-archive.md`.
-- [decision] Antigravity headless permission behavior (measured 2026-10-06 on
-  `agy.exe` 1.2.9): the exit codes (5 on denied actions, 2 on empty output), the
-  `--allow-tools` flag and its mutual exclusions, and the `view_file` /
-  `grep_search` caveats are archived verbatim in `decisions-archive.md`.
+- [decision] Antigravity headless permission behavior (measured 2026-10-06): exit codes
+  and flag caveats are archived verbatim in `decisions-archive.md`.
 - [decision] OpenCode avoids duplicate skill mirrors and uses Claude-compatible
   skills.
 - [decision] Codex lifecycle and guard behavior is launcher-based, because Codex
@@ -72,14 +70,12 @@ High-signal context loaded at session start. Detailed history belongs in
   reproducibly; the rest are unstable or dead — measurements and traps are in
   `decisions-archive.md` (2026-09-14).
 - [decision] CommandCode model ids are verified against
-  `GET {COMMANDCODE_BASE_URL}/models`, never from memory: the catalog drifts and
-  the old `api-providers.md` advertised nine ids that no longer resolve. Each
-  CommandCode consumer declares models separately, so a new model needs one entry
-  in `tools/opencode_engine.py` `_PROVIDER_MODELS` (OpenCode), `.vscode/settings.json`
-  (Copilot), and `~/.config/kilo/kilo.jsonc` (Kilo). Kilo refs use the full
-  upstream id (`commandcode/deepseek/deepseek-v4-pro`) while OpenCode refs use the
-  harness key (`commandcode/deepseek-v4-pro`) — both correct for their dialect.
-  `context_length` comes from the `/models` response, not the file. (2026-09-28)
+  `GET {COMMANDCODE_BASE_URL}/models`, never from memory. Each consumer declares models
+  separately: `_PROVIDER_MODELS` in `tools/opencode_engine.py` (OpenCode uses the harness
+  key `commandcode/deepseek-v4-pro`), `.vscode/settings.json` (Copilot), and
+  `~/.config/kilo/kilo.jsonc` (Kilo uses the full upstream id
+  `commandcode/deepseek/deepseek-v4-pro`). `context_length` comes from the response, not
+  the file. (2026-09-28; catalog 80 model on 2026-10-16)
 - [decision] Subagent `ask` permission behaves as `allow` (measured,
   operator-confirmed 2026-10-07): a headless child session has no prompt
   channel, so `effect: ask` silently permits -- the operator saw no dialog
@@ -91,16 +87,17 @@ High-signal context loaded at session start. Detailed history belongs in
   raised baselines; detail in `decisions-archive.md`.
 - [decision] GUI worker console (2026-10-07): full detail in `decisions-archive.md`
   (loopback-only stdlib web app in `tools/gui_server.py`, `.env` key NAMES only).
-- [decision] dsh worker verified (2026-10-07): `tools/dsh_delegate.py` drives dsh
-  end to end; the setup prerequisites and the two bugs it surfaced (UTF-8 output,
-  and the `.env` base URL being wrong for dsh's messages protocol) are recorded
-  in `decisions-archive.md`.
-- [decision] Codex worker arm (2026-10-07): `tools/codex_delegate.py` runs Codex
-  through `codex-env.ps1` with a read-only sandbox by default (`--allow-write` ->
-  workspace-write; the dangerous flags are never emitted), writes the guardrail
-  brief to a file because the Windows npm shim truncates multi-line arguments, and
-  returns a post-run git status/diffstat. Codex has no project hooks, so
-  `tools/codex_guard.py` stays the separate preflight.
+- [decision] dsh worker verified (2026-10-07): detail in `decisions-archive.md`.
+- [decision] Pipeline 4 vai trò (2026-10-16): Jev (agent trên **model JEV**
+  `openrouter/jev-router`) điều phối; **Codex** ra đề bài + **verify** (`gpt-6.1-sol`,
+  effort `medium`, đổi bằng `--model`/`--effort`); **DeepSeek V4.1 Flash** (OpenCode CLI,
+  + `dsh`) code sâu; **Gemini 3.8 Flash** (Antigravity CLI) việc nhanh nhẹ. Fallback:
+  Codex không ổn định → DeepSeek viết brief + thẩm định lại Gemini. Jev `edit: deny` và
+  wrapper chạy agent này **không `--auto`** để deny có hiệu lực. Gotcha: timeout mặc định
+  của wrapper opencode/agy là **120s** → job dài bị giết oan (đã nâng 900/600); `.ps1` tải
+  về bị mark-of-the-web → phải `Unblock-File`. Catalog **80 model / 4 provider**.
+- [decision] Codex worker arm (2026-10-07): full detail in `decisions-archive.md`
+  (read-only sandbox by default, brief in a file, post-run git status/diffstat).
 - [decision] Subagent seam implemented (2026-10-07): `tools/subagent_cli.py` provides
   the Protocol in `tools/subagent_seam.py`; `write` is deliberately not advertised.
   Version 4.3.0; full detail in `decisions-archive.md`.
