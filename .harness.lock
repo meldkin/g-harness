@@ -9,11 +9,11 @@
 # [shared_files] mới là harness; file khác ở đó là CODE DỰ ÁN.
 
 [harness]
-version = "4.3.0"
+version = "4.3.1"
 source = "solo-code-io/solo-code-cli"
-generated_at = "2026-10-07T00:00:00Z"
+generated_at = "2026-10-15T15:52:54Z"
 
-# --- ENGINE STATUS (v4.3.0) ---
+# --- ENGINE STATUS (v4.3.1) ---
 # .opencode/  -> first-class primary agent engine, now targeting OpenCode v2
 #                (@opencode/cli + @opencode/plugin; the v1 line opencode-ai /
 #                @opencode-ai/plugin is retired). tools/opencode_engine.py
@@ -62,6 +62,10 @@ shared_dirs = [
 # harness, nên mọi file được git theo dõi trong ba thư mục trên đều là harness.
 # Một bản deploy sang dự án đích chỉ khai báo tập con thực sự được ship.
 paths = [
+# GIỮ BẰNG TAY — KHÔNG regenerate: `_generate_harness_lock()` chỉ ship những gì một
+# dự án đích nhận được, nên regenerate sẽ BỎ MẤT 39 entry mà lock gốc cố ý giữ
+# (tools/deploy.py, garden.py, test_e2e.py, các test suite, .github/workflows/*).
+# Sửa template trong deploy.py trước, rồi mới regenerate.
     ".github/copilot-instructions.md",
     ".github/prompts/commit.prompt.md",
     ".github/prompts/debug.prompt.md",
@@ -89,7 +93,12 @@ paths = [
     "tools/benchmark_executors.py",
     "tools/check_lint_budget.py",
     "tools/claude_engine.py",
+    "tools/claude_guard_compat.py",
+    "tools/codex_delegate.py",
+    "tools/codex_guard.py",
+    "tools/codex_session.py",
     "tools/codex_usage.py",
+    "tools/codex_verify.py",
     "tools/compaction.py",
     "tools/compaction_pruner.py",
     "tools/config/coverage-budget.json",
@@ -99,19 +108,24 @@ paths = [
     "tools/dsh_delegate.py",
     "tools/garden.py",
     "tools/generate_harness.py",
+    "tools/gui/index.html",
+    "tools/gui_server.py",
     "tools/harness_config.py",
     "tools/kilo_cli_delegate.py",
     "tools/kilo_server_manager.py",
     "tools/kilo_usage_report.py",
+    "tools/opencode-skip-skills.txt",
     "tools/opencode_delegate.py",
     "tools/opencode_engine.py",
-    "tools/opencode-skip-skills.txt",
     "tools/session_analytics.py",
+    "tools/session_control.py",
     "tools/session_persistence.py",
+    "tools/session_registry.py",
     "tools/shared_state.py",
     "tools/shared_state_schema.sql",
     "tools/snapshot_testing.py",
     "tools/solocode_config.py",
+    "tools/subagent_cli.py",
     "tools/subagent_seam.py",
     "tools/test_agent_scope.py",
     "tools/test_antigravity_delegate.py",
@@ -120,34 +134,49 @@ paths = [
     "tools/test_benchmark_executors.py",
     "tools/test_boundary_audit.py",
     "tools/test_check_lint_budget.py",
+    "tools/test_check_skips.py",
     "tools/test_checklist_gate.py",
     "tools/test_claude_engine.py",
     "tools/test_claude_guard.py",
     "tools/test_claude_hooks.py",
+    "tools/test_codex_delegate.py",
     "tools/test_codex_guard.py",
+    "tools/test_codex_session.py",
+    "tools/test_codex_usage.py",
+    "tools/test_codex_verify.py",
+    "tools/test_compaction.py",
+    "tools/test_compaction_pruner.py",
     "tools/test_coverage_gate.py",
     "tools/test_deploy.py",
+    "tools/test_dsh_delegate.py",
     "tools/test_e2e.py",
+    "tools/test_eval_harness.py",
     "tools/test_garden.py",
     "tools/test_generate_harness.py",
     "tools/test_generator_idempotency.py",
     "tools/test_guard.py",
+    "tools/test_gui_server.py",
+    "tools/test_harness_config.py",
     "tools/test_integration.py",
     "tools/test_kilo_cli_delegate.py",
     "tools/test_kilo_executor_mode.py",
+    "tools/test_kilo_server_manager.py",
+    "tools/test_kilo_usage_report.py",
     "tools/test_opencode_delegate.py",
     "tools/test_secret_patterns.py",
+    "tools/test_session_analytics.py",
+    "tools/test_session_control.py",
     "tools/test_session_persistence.py",
+    "tools/test_session_registry.py",
     "tools/test_shared_state.py",
     "tools/test_snapshot_testing.py",
+    "tools/test_solocode_config.py",
+    "tools/test_subagent_cli.py",
     "tools/test_subagent_seam.py",
     "tools/test_validate_schemas.py",
+    "tools/test_win_sandbox.py",
     "tools/validate_schemas.py",
-    "tools/codex_guard.py",
-    "tools/claude_guard_compat.py",
-    "tools/codex_session.py",
-    "tools/codex_verify.py",
-]
+    "tools/win_sandbox.py",]
 
 # File gốc harness — KHÔNG phải code dự án
 files = [
