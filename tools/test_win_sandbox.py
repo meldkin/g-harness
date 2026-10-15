@@ -112,6 +112,15 @@ def test_contains_directory_identity_child_and_sibling(tmp_path):
     assert mod.contains_directory(str(root), str(sibling)) is False
 
 
+@WIN_ONLY
+def test_contains_directory_across_drives_is_disjoint():
+    """F: workspace + C: %TEMP% is the normal layout; relpath raises there."""
+    mod = _load()
+    assert mod.contains_directory("C:\\ws", "F:\\ws") is False
+    assert mod.contains_directory("F:\\ws", "C:\\Temp\\t") is False
+    assert mod.contains_directory("C:\\ws", "C:\\ws\\child") is True
+
+
 def test_workspace_write_sid_is_deterministic_and_distinct(tmp_path):
     mod = _load()
     a, b = str(tmp_path / "a"), str(tmp_path / "b")
@@ -167,6 +176,26 @@ def test_windows_command_line_quoting():
     assert mod.windows_command_line([""]) == '""'
     assert mod.windows_command_line(["a b"]) == '"a b"'
     assert mod.windows_command_line(["a b", 'c"d']) == '"a b" "c\\"d"'
+
+
+def test_confined_argv_prefixes_the_runner():
+    mod = _load()
+    argv = mod.confined_argv(
+        ["program", "arg"], "C:/ws", "C:/tmp", also_write=["C:/state"]
+    )
+    assert argv[:3] == [sys.executable, str(SCRIPT), "run"]
+    assert argv[argv.index("--workspace") + 1] == "C:/ws"
+    assert argv[argv.index("--temp") + 1] == "C:/tmp"
+    assert argv[argv.index("--also-write") + 1] == "C:/state"
+    assert argv[argv.index("--mode") + 1] == "workspace-write"
+    assert argv[argv.index("--") + 1 :] == ["program", "arg"]
+
+
+def test_confined_argv_read_only_carries_no_extra_root():
+    mod = _load()
+    argv = mod.confined_argv(["x"], "w", "t", mode="read-only")
+    assert argv[argv.index("--mode") + 1] == "read-only"
+    assert "--also-write" not in argv
 
 
 # ── pure: runner argv contract ───────────────────────────────────────────────
@@ -331,6 +360,7 @@ def test_probe_reports_this_host_supports_restricted_tokens(capsys):
     assert result["enforcement"] == "partial"
     assert mod.main(["probe"]) == 0
     assert json.loads(capsys.readouterr().out)["available"] is True
+    assert mod.confinement_available() is True
 
 
 @WIN_ONLY

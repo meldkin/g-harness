@@ -12,7 +12,12 @@ way the other engines are. This wrapper supplies the fence instead:
      referenced from a single-line prompt;
   3. a **post-run change summary** (`git status` + `git diff --stat`) captured
      into the result, because a Codex run is only trustworthy once the operator
-     inspects what it actually wrote.
+     inspects what it actually wrote;
+  4. an optional **OS-level confinement** (`--confine`) that wraps the launcher in
+     `tools/win_sandbox.py run`, so one restricted token covers PowerShell, Codex
+     and every process Codex spawns. It fails closed on a host that cannot
+     confine, and it grants `~/.codex` back as a writable root because Codex keeps
+     its session and log state there.
 
 Codex is launched through `codex-env.ps1` (loads `.env` → `OPENAI_API_KEY`,
 injects the base URL). That launcher is an unsigned PowerShell script, so it is
@@ -41,10 +46,30 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+TOOLS_DIR = Path(__file__).resolve().parent
 LAUNCHER = ROOT / "codex-env.ps1"
 USAGE_LOG = ROOT / ".solocode" / "codex-delegate-usage.jsonl"
 DEFAULT_TIMEOUT = 900
 DEFAULT_MODEL = "gpt-6.1-sol"
+# Codex resolves its provider config from ~/.codex/config.toml and writes session
+# and log state there. Reads are unrestricted inside the sandbox, so only the
+# write half needs this grant.
+CODEX_STATE_DIR = Path.home() / ".codex"
+
+
+def _load_sandbox():
+    """Import the sibling win_sandbox module (tools/ may not be on sys.path)."""
+    if str(TOOLS_DIR) not in sys.path:
+        sys.path.insert(0, str(TOOLS_DIR))
+    import win_sandbox
+
+    return win_sandbox
+
+
+def default_confine_roots() -> list[str]:
+    """Writable roots a confined Codex run needs beyond the workspace and temp."""
+    return [str(CODEX_STATE_DIR)] if CODEX_STATE_DIR.is_dir() else []
+
 
 GUARDRAIL = """\
 STRICT OPERATING CONSTRAINTS (follow exactly):
@@ -74,8 +99,17 @@ def build_plan(
     out_file: Path,
     root: Path = ROOT,
     powershell: str = "powershell",
+    confine: bool = False,
+    confine_temp: Path | None = None,
+    confine_also_write: list[str] | None = None,
 ) -> dict[str, object]:
-    """Build the launch plan. Pure — this is the security-relevant part."""
+    """Build the launch plan. Pure — this is the security-relevant part.
+
+    ``confine`` wraps the launcher in ``win_sandbox.py run``, so the restricted
+    token covers PowerShell, Codex, and every process Codex spawns. It requires
+    ``confine_temp``: the private temp directory the runner grants (the delegate's
+    own scratch dir, where the brief and the final message live).
+    """
     sandbox = "workspace-write" if allow_write else "read-only"
     argv = [
         powershell,
@@ -99,7 +133,22 @@ def build_plan(
         f"Read the file {brief_file} and carry out the task it contains exactly. "
         "It is your complete brief."
     )
-    return {"argv": argv, "brief": GUARDRAIL + "\n" + task, "sandbox": sandbox}
+    if confine:
+        if confine_temp is None:
+            raise ValueError("confine requires confine_temp")
+        argv = _load_sandbox().confined_argv(
+            argv,
+            str(root),
+            str(confine_temp),
+            mode=sandbox,
+            also_write=confine_also_write or [],
+        )
+    return {
+        "argv": argv,
+        "brief": GUARDRAIL + "\n" + task,
+        "sandbox": sandbox,
+        "confined": confine,
+    }
 
 
 def change_summary(root: Path = ROOT) -> dict[str, str]:
@@ -134,6 +183,10 @@ def run_plan(argv: list[str], out_file: Path, timeout_s: int) -> tuple[int, str]
     text = ""
     if out_file.is_file():
         text = out_file.read_text(encoding="utf-8", errors="replace")
+    if not text.strip() and proc.stdout:
+        # A read-only confined run has nowhere to write `-o` (the sandbox grants no
+        # writable root in read-only), so the transcript is the only copy left.
+        text = proc.stdout
     if proc.returncode != 0:
         return proc.returncode, (text or proc.stderr or proc.stdout)
     return (0 if text.strip() else 2), text
@@ -166,6 +219,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="use the workspace-write sandbox (default: read-only)",
     )
+    parser.add_argument(
+        "--confine",
+        action="store_true",
+        help="confine the whole worker subtree with a Windows ACL restricted token",
+    )
+    parser.add_argument(
+        "--confine-also-write",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="extra writable root for the confined worker (repeatable)",
+    )
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
     parser.add_argument(
         "--dry-run", action="store_true", help="print the plan and exit"
@@ -187,6 +252,42 @@ def main(argv: list[str] | None = None) -> int:
         print("ERROR: powershell/pwsh not found on PATH.", file=sys.stderr)
         return 1
 
+    confine_roots: list[str] = []
+    if args.confine:
+        # Fail closed: a caller who asked for confinement must never get an
+        # unconfined worker because the host cannot enforce it.
+        sandbox_module = _load_sandbox()
+        report = sandbox_module.probe()
+        if not report.get("available"):
+            print(
+                f"ERROR: --confine requested but this host cannot confine: "
+                f"{report.get('reason')}",
+                file=sys.stderr,
+            )
+            return 1
+        if args.confine_also_write and not args.allow_write:
+            # read-only grants no writable root at all — that is the mode's point.
+            # Silently dropping a flag the caller typed would hide that.
+            print(
+                "ERROR: read-only confinement has no writable root; drop "
+                "--confine-also-write or add --allow-write.",
+                file=sys.stderr,
+            )
+            return 1
+        # Gated off deliberately: the mechanism provisions correctly (icacls
+        # verified), but a real Codex run under the restricted token never returns
+        # — 300s via this wrapper, >900s when driven directly, while the same
+        # prompt unconfined exits 0. Refusing is better than a silent 15-minute
+        # hang. Remove this guard once the hang is diagnosed (plan.md P2.1b).
+        print(
+            "ERROR: --confine is not usable for Codex yet: a confined run hangs "
+            "after provisioning. See plan.md §0 (P2.1b) for the evidence.",
+            file=sys.stderr,
+        )
+        return 1
+        if args.allow_write:
+            confine_roots = default_confine_roots() + list(args.confine_also_write)
+
     tmp = Path(tempfile.mkdtemp(prefix="codex-delegate-"))
     brief_file = tmp / "brief.md"
     out_file = tmp / "last-message.md"
@@ -197,6 +298,9 @@ def main(argv: list[str] | None = None) -> int:
         brief_file=brief_file,
         out_file=out_file,
         powershell=powershell,
+        confine=args.confine,
+        confine_temp=tmp,
+        confine_also_write=confine_roots,
     )
     brief_file.write_text(str(plan["brief"]), encoding="utf-8")
 
@@ -206,6 +310,8 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "argv": plan["argv"],
                     "sandbox": plan["sandbox"],
+                    "confined": plan["confined"],
+                    "confine_also_write": confine_roots,
                     "brief": str(brief_file),
                 },
                 ensure_ascii=False,
@@ -226,6 +332,7 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "exit": code,
                     "sandbox": plan["sandbox"],
+                    "confined": plan["confined"],
                     "output": output,
                     "changes": summary,
                 },
@@ -235,10 +342,22 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         print(output or f"(no output; exit {code})")
+        confinement = ""
+        if plan["confined"]:
+            confinement = f" confine=windows-acl temp={tmp} also_write={confine_roots}"
         print(
-            f"\n--- sandbox={plan['sandbox']} exit={code} elapsed={elapsed:.1f}s ---",
+            f"\n--- sandbox={plan['sandbox']} exit={code} "
+            f"elapsed={elapsed:.1f}s{confinement} ---",
             file=sys.stderr,
         )
+        if plan["confined"]:
+            # Tool-runner's note for the operator, not decoration: the workspace
+            # ACE outlives the run by design, so it needs a named way back.
+            print(
+                "--- the workspace capability ACE stands (cross-run cache); "
+                f"remove it with: python tools/win_sandbox.py revert --workspace {ROOT}",
+                file=sys.stderr,
+            )
         if summary["status"]:
             print(f"--- changes ---\n{summary['status']}", file=sys.stderr)
     return code if code in (0, 2, 3, 4) else code

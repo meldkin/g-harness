@@ -76,6 +76,7 @@ import os
 import sys
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 Mode = Literal["read-only", "workspace-write"]
@@ -120,8 +121,18 @@ def _norm(path: str) -> str:
 
 def contains_directory(root: str, candidate: str) -> bool:
     """Whether ``root`` is the same directory as ``candidate`` or contains it."""
-    rel = os.path.relpath(_norm(candidate), _norm(root))
-    return rel == os.curdir or (
+    root_norm = _norm(root)
+    candidate_norm = _norm(candidate)
+    if root_norm == candidate_norm:
+        return True
+    try:
+        rel = os.path.relpath(candidate_norm, root_norm)
+    except ValueError:
+        # Different drives on Windows: there is no relative path, so neither
+        # directory can contain the other. Without this the F: repo + C: %TEMP%
+        # layout — the common one — failed every provision with exit 127.
+        return False
+    return (
         rel != os.pardir
         and not rel.startswith(os.pardir + os.sep)
         and not os.path.isabs(rel)
@@ -172,6 +183,40 @@ def assert_private_temp_disjoint(writable_dirs: list[str], temp_dir: str) -> Non
 def windows_command_line(argv: list[str]) -> str:
     """Join argv into a CommandLineToArgvW-compatible command line string."""
     return " ".join(_quote_arg(arg) for arg in argv)
+
+
+def confined_argv(
+    argv: list[str],
+    workspace: str,
+    temp: str,
+    *,
+    mode: Mode = "workspace-write",
+    also_write: list[str] | None = None,
+) -> list[str]:
+    """Prefix ``argv`` with this module's runner, so the whole subtree is confined.
+
+    This is the seam a delegate wrapper executes *instead of* ``argv``: the
+    restricted token is inherited by every descendant the worker spawns.
+    """
+    prefix = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "run",
+        "--workspace",
+        workspace,
+        "--temp",
+        temp,
+        "--mode",
+        mode,
+    ]
+    for extra in also_write or []:
+        prefix += ["--also-write", extra]
+    return [*prefix, "--", *argv]
+
+
+def confinement_available() -> bool:
+    """Whether this host can confine at all — ``probe`` with no host mutation."""
+    return bool(probe().get("available"))
 
 
 def _quote_arg(arg: str) -> str:
