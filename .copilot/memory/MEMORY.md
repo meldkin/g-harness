@@ -116,8 +116,8 @@ High-signal context loaded at session start. Detailed history belongs in
   (`SEC_E_NO_CREDENTIALS`) ⇒ không bọc được worker nào của fleet (mọi worker gọi
   API). `--confine` trong `codex_delegate` bị chặn có chủ ý; nếu cần cách ly →
   AppContainer (chưa làm). Việc kế: G7/P2.2 (spec `plan.md` §4.1).
-- [decision] G7 control plane (2026-10-15): `tools/session_registry.py` +
-  `tools/session_control.py` (`list`/`send`/`interrupt`); `opencode_delegate` đã ghi
-  registry (Popen để lộ pid). **Race thật**: interrupt bị delegate ghi đè thành
-  `exited` → sửa bằng claim `interrupting` trước khi giết. `send_message` chỉ cho
-  phiên khai báo kênh (hiện chưa có). Delegate còn lại chưa nối.
+- [decision] G7 control plane (2026-10-15): `session_registry.py` +
+  `session_control.py` (`list`/`send`/`interrupt`/`prune`); cả 5 delegate đã ghi
+  registry (seam `Popen`→`record_start(pid)`→`kill_tree` khi timeout). **Race thật**:
+  interrupt bị ghi đè thành `exited` → claim `interrupting` trước khi giết.
+  `send_message` chỉ cho phiên khai báo kênh (hiện chưa có).
