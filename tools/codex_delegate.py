@@ -66,6 +66,24 @@ def _load_sandbox():
     return win_sandbox
 
 
+def _load_registry():
+    """Import the sibling session_registry module (tools/ may not be on sys.path)."""
+    if str(TOOLS_DIR) not in sys.path:
+        sys.path.insert(0, str(TOOLS_DIR))
+    import session_registry
+
+    return session_registry
+
+
+def _load_control():
+    """Import the sibling session_control module (tools/ may not be on sys.path)."""
+    if str(TOOLS_DIR) not in sys.path:
+        sys.path.insert(0, str(TOOLS_DIR))
+    import session_control
+
+    return session_control
+
+
 def default_confine_roots() -> list[str]:
     """Writable roots a confined Codex run needs beyond the workspace and temp."""
     return [str(CODEX_STATE_DIR)] if CODEX_STATE_DIR.is_dir() else []
@@ -170,25 +188,60 @@ def change_summary(root: Path = ROOT) -> dict[str, str]:
     return {"status": _git("status", "--porcelain"), "diffstat": _git("diff", "--stat")}
 
 
-def run_plan(argv: list[str], out_file: Path, timeout_s: int) -> tuple[int, str]:
-    """Execute the plan and read Codex's final message from `-o`."""
+def run_plan(
+    argv: list[str],
+    out_file: Path,
+    timeout_s: int,
+    *,
+    worker: str = "codex",
+    model: str | None = None,
+) -> tuple[int, str]:
+    """Execute the plan, record the session, and read Codex's message from `-o`."""
+    registry = _load_registry()
     try:
-        proc = subprocess.run(  # noqa: S603 — fixed argv; brief is data, not a command
-            argv, capture_output=True, text=True, timeout=timeout_s, check=False
+        proc = subprocess.Popen(  # noqa: S603 — fixed argv; brief is data, not a command
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
-    except subprocess.TimeoutExpired:
-        return 3, f"timeout after {timeout_s}s"
-    except OSError as exc:
+    except OSError as exc:  # no pid exists yet, so there is no session to record
         return 4, f"failed to launch: {exc}"
+
+    # The pid is what makes the run interruptible from the control plane, so the
+    # record follows Popen rather than preceding it.
+    run_id = registry.record_start(worker, model=model, pid=proc.pid, argv=argv)
+
+    timed_out = False
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        # Kill the whole tree: Codex spawns a PowerShell launcher and helpers, and
+        # a bare kill() would leave them running past the timeout this enforces.
+        _load_control().kill_tree(proc.pid)
+        stdout, stderr = proc.communicate()
+
+    exit_code = proc.returncode
+    # record_finish settles only a `running` record, so an operator's interrupt
+    # keeps that verdict instead of being overwritten by `exited`.
+    registry.record_finish(
+        run_id, exit_code, state="timeout" if timed_out else "exited"
+    )
+
     text = ""
     if out_file.is_file():
         text = out_file.read_text(encoding="utf-8", errors="replace")
-    if not text.strip() and proc.stdout:
+    if not text.strip() and stdout:
         # A read-only confined run has nowhere to write `-o` (the sandbox grants no
         # writable root in read-only), so the transcript is the only copy left.
-        text = proc.stdout
-    if proc.returncode != 0:
-        return proc.returncode, (text or proc.stderr or proc.stdout)
+        text = stdout
+    if timed_out:
+        return 3, f"timeout after {timeout_s}s"
+    if exit_code != 0:
+        return exit_code, (text or stderr or stdout)
     return (0 if text.strip() else 2), text
 
 
@@ -321,7 +374,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     start = time.monotonic()
-    code, output = run_plan(list(plan["argv"]), out_file, args.timeout)  # type: ignore[arg-type]
+    code, output = run_plan(  # type: ignore[arg-type]
+        list(plan["argv"]), out_file, args.timeout, model=args.model
+    )
     elapsed = time.monotonic() - start
     log_usage(args.model, str(plan["sandbox"]), elapsed, code)
     summary = change_summary()

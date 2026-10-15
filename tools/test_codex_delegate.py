@@ -13,6 +13,27 @@ from types import SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
+TOOLS = Path(__file__).resolve().parent
+# Both roots unconditionally: under `pytest tools/` they are already present, so a
+# guarded insert left this file with one line it could never cover, and a duplicate
+# sys.path entry costs nothing.
+for _entry in (str(ROOT), str(TOOLS)):
+    sys.path.insert(0, _entry)
+
+import session_registry  # noqa: E402
+
+
+def _registry():
+    """The registry module the delegate imports, so both share one object."""
+    return session_registry
+
+
+@pytest.fixture(autouse=True)
+def _registry_into_tmp(tmp_path, monkeypatch):
+    """No unit test may write session records into the repo's .solocode/."""
+    monkeypatch.setattr(session_registry, "SESSION_DIR", tmp_path)
+
+
 SCRIPT = ROOT / "tools" / "codex_delegate.py"
 
 
@@ -180,47 +201,127 @@ def test_change_summary_shape():
     assert set(mod.change_summary()) == {"status", "diffstat"}
 
 
+class _FakePopen:
+    """A Popen stand-in: pid for the registry, communicate() for the output."""
+
+    def __init__(
+        self,
+        stdout: str = "",
+        stderr: str = "",
+        returncode: int = 0,
+        pid: int = 5150,
+        timeout: bool = False,
+        on_communicate=None,
+    ) -> None:
+        self.pid = pid
+        self.returncode = None
+        self._stdout = stdout
+        self._stderr = stderr
+        self._returncode = returncode
+        self._timeout = timeout
+        self._on_communicate = on_communicate
+
+    def communicate(self, timeout: int | None = None):
+        if self._on_communicate is not None:
+            self._on_communicate()
+        if self._timeout:
+            # One-shot: the timeout path kills the tree, so the next communicate()
+            # returns instead of raising again.
+            self._timeout = False
+            raise subprocess.TimeoutExpired(cmd="codex", timeout=timeout or 0)
+        self.returncode = self._returncode
+        return self._stdout, self._stderr
+
+
 def test_run_plan_returns_output_and_code(monkeypatch, tmp_path):
     mod = _load()
     out = tmp_path / "o.md"
-
-    def fake(*_a, **_k):
-        out.write_text("done", encoding="utf-8")
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(mod.subprocess, "run", fake)
+    proc = _FakePopen(on_communicate=lambda: out.write_text("done", encoding="utf-8"))
+    monkeypatch.setattr(mod.subprocess, "Popen", lambda *_a, **_k: proc)
     assert mod.run_plan(["x"], out, 5) == (0, "done")
 
 
 def test_run_plan_empty_output_is_exit_two(monkeypatch, tmp_path):
     mod = _load()
-    monkeypatch.setattr(
-        mod.subprocess,
-        "run",
-        lambda *_a, **_k: SimpleNamespace(returncode=0, stdout="", stderr=""),
-    )
+    monkeypatch.setattr(mod.subprocess, "Popen", lambda *_a, **_k: _FakePopen())
     assert mod.run_plan(["x"], tmp_path / "o", 5)[0] == 2
 
 
 def test_run_plan_timeout_is_exit_three(monkeypatch, tmp_path):
     mod = _load()
-
-    def boom(*_a, **_k):
-        raise subprocess.TimeoutExpired(cmd="x", timeout=1)
-
-    monkeypatch.setattr(mod.subprocess, "run", boom)
-    assert mod.run_plan(["x"], tmp_path / "o", 5)[0] == 3
+    monkeypatch.setattr(
+        mod.subprocess, "Popen", lambda *_a, **_k: _FakePopen(timeout=True)
+    )
+    monkeypatch.setattr(
+        mod, "_load_control", lambda: SimpleNamespace(kill_tree=lambda _p: [5150])
+    )
+    assert mod.run_plan(["x"], tmp_path / "o", 5) == (3, "timeout after 5s")
 
 
 def test_run_plan_falls_back_to_the_transcript(monkeypatch, tmp_path):
     """A read-only confined run cannot write `-o`, so stdout is all that is left."""
     mod = _load()
     monkeypatch.setattr(
-        mod.subprocess,
-        "run",
-        lambda *_a, **_k: SimpleNamespace(returncode=0, stdout="the answer", stderr=""),
+        mod.subprocess, "Popen", lambda *_a, **_k: _FakePopen(stdout="the answer")
     )
     assert mod.run_plan(["x"], tmp_path / "never-written", 5) == (0, "the answer")
+
+
+def test_run_plan_reports_a_launch_failure(monkeypatch, tmp_path):
+    mod = _load()
+
+    def boom(*_a, **_k):
+        raise OSError("no launcher")
+
+    monkeypatch.setattr(mod.subprocess, "Popen", boom)
+    assert mod.run_plan(["x"], tmp_path / "o", 5) == (
+        4,
+        "failed to launch: no launcher",
+    )
+
+
+# ── registry wiring (gap G7) ─────────────────────────────────────────────────
+
+
+def test_run_plan_records_the_session_and_settles_it(monkeypatch, tmp_path):
+    mod, registry = _load(), _registry()
+    monkeypatch.setattr(mod.subprocess, "Popen", lambda *_a, **_k: _FakePopen())
+    mod.run_plan(["codex", "exec"], tmp_path / "o", 5, model="gpt-6.1-sol")
+
+    sessions = registry.list_sessions(session_dir=tmp_path)
+    assert len(sessions) == 1
+    assert sessions[0]["worker"] == "codex"
+    assert sessions[0]["model"] == "gpt-6.1-sol"
+    assert sessions[0]["pid"] == 5150  # the worker pid, which makes interrupt possible
+    assert sessions[0]["state"] == "exited"
+
+
+def test_run_plan_timeout_kills_the_tree_and_records_the_timeout(monkeypatch, tmp_path):
+    mod, registry = _load(), _registry()
+    killed: list[int] = []
+    monkeypatch.setattr(
+        mod,
+        "_load_control",
+        lambda: SimpleNamespace(kill_tree=lambda pid: killed.append(pid) or [pid]),
+    )
+    monkeypatch.setattr(
+        mod.subprocess, "Popen", lambda *_a, **_k: _FakePopen(timeout=True)
+    )
+    mod.run_plan(["codex", "exec"], tmp_path / "o", 5)
+
+    assert killed == [5150]
+    assert registry.list_sessions(session_dir=tmp_path)[0]["state"] == "timeout"
+
+
+def test_a_launch_failure_records_no_session(monkeypatch, tmp_path):
+    mod, registry = _load(), _registry()
+
+    def boom(*_a, **_k):
+        raise OSError("missing")
+
+    monkeypatch.setattr(mod.subprocess, "Popen", boom)
+    mod.run_plan(["codex"], tmp_path / "o", 5)
+    assert registry.list_sessions(session_dir=tmp_path) == []
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
@@ -265,7 +366,9 @@ def test_main_dry_run_prints_the_plan(monkeypatch, capsys):
 def test_main_full_run_with_mocked_plan(monkeypatch, capsys):
     mod = _load()
     monkeypatch.setattr(mod, "_find_powershell", lambda: "ps")
-    monkeypatch.setattr(mod, "run_plan", lambda _argv, _out, _t: (0, "the answer"))
+    monkeypatch.setattr(
+        mod, "run_plan", lambda _argv, _out, _t, **_kw: (0, "the answer")
+    )
     monkeypatch.setattr(
         mod, "change_summary", lambda root=None: {"status": " M x", "diffstat": ""}
     )
