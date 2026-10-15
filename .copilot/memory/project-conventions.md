@@ -54,23 +54,17 @@ The harness uses `tools/harness_config.py` for layered configuration:
 
 ## Destructive Harness Tooling
 
-Rules earned from `deploy.py` deleting a target project's `package.json`,
-`tsconfig.json`, CI workflows and dev scripts (2026-08-03, see MEMORY.md).
+Forensics (the incident where a deploy deleted a target project's `package.json`,
+`tsconfig.json`, CI workflows and dev scripts) are in `decisions-archive.md`. Rules:
 
-- **A deploy may only delete a path it can prove it wrote.** Never infer
-  ownership from a file's extension, directory or naming pattern — consult an
-  explicit list (`HARNESS_OWNED_ROOT_FILES`, `RETIRED_*`). A target project's
-  root is full of files that look harness-ish and are not ours.
-- `.github/`, `.vscode/` and `tools/` are **shared** with the target project,
-  never wholly harness. Classify any new deployed directory as shared or
-  exclusive; there is no safe default.
-- Any code path that can `unlink()`/`rmtree()` inside a *target* project needs
-  a test that builds a realistic fake project and asserts its files survive.
-  Assert on real damage (`AssertionError`), not on an import error.
-- Before claiming a guard works, run the new test against the pre-fix code and
-  confirm it fails. A guard that passes both ways guards nothing.
-- Prefer an invariant over a case: a test that fails when a future entry is
-  left unclassified beats a test that pins today's list.
+- **A deploy may only delete a path it can prove it wrote** — consult
+  `HARNESS_OWNED_ROOT_FILES` / `RETIRED_*`; never infer ownership from an extension,
+  directory or naming pattern.
+- `.github/`, `.vscode/`, `tools/` are **shared**, never wholly harness.
+- Any `unlink()`/`rmtree()` inside a *target* project needs a test that builds a
+  realistic fake project and asserts its files survive — and that test must fail
+  against the pre-fix code, or it guards nothing.
+- Prefer an invariant over a case.
 
 ## Docs and Generators
 
