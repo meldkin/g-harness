@@ -50,6 +50,10 @@ Usage (argv-prefix runner — the seam the harness delegates can wrap):
 
     python tools/win_sandbox.py probe          # availability, no host mutation
     python tools/win_sandbox.py run --self-test
+    python tools/win_sandbox.py revert --workspace <dir>   # drop the standing ACE
+
+The workspace ACE outlives the run on purpose (the reuse cache), so ``revert`` is
+how a tree gets its DACL back once the sandbox is no longer wanted on it.
 
 The delegate wrappers (``tools/*_delegate.py``) can be confined by prefixing
 their own argv with ``run ... --``; the restricted token is inherited by every
@@ -72,6 +76,7 @@ Mode = Literal["read-only", "workspace-write"]
 
 _WIN32 = "win32"
 _RUNNER_SIGNATURE = "harness-acl-run"
+_REVERT_SIGNATURE = "win_sandbox revert"
 _RUNNER_FAILURE_EXIT = 127
 # 2**30 - 1: the 30-bit subauthority ceiling the workspace capability shape uses.
 _SID_CEILING = 2**30 - 1
@@ -751,6 +756,29 @@ def revoke_write(path: str, sid_ptr: int) -> bool:
         return True
 
 
+def revoke_grant(path: str, sid_string: str) -> bool:
+    """Drop the capability ACE for ``sid_string``; False when the tree has none.
+
+    A bare ``revoke_write`` cannot answer that question — SetEntriesInAclW
+    accepts a REVOKE entry that matches nothing and still rewrites the DACL — so
+    the check reads the DACL first. Callers need the distinction to tell
+    "already clean" from "just cleaned".
+    """
+    k32, adv = _api()
+    sid_ptr = _parse_sid(adv, sid_string)
+    try:
+        old_acl, descriptor = _read_current_dacl(k32, adv, path)
+        try:
+            if not old_acl or not _has_exact_grant(old_acl, sid_ptr):
+                return False
+        finally:
+            if descriptor:
+                k32.LocalFree(ctypes.c_void_p(descriptor))
+        return revoke_write(path, sid_ptr)
+    finally:
+        k32.LocalFree(ctypes.c_void_p(sid_ptr))
+
+
 # ─── Restricted token ───────────────────────────────────────────────────────
 
 
@@ -1210,6 +1238,39 @@ def run_confined(raw_argv: list[str]) -> int:
             sandbox.dispose()
 
 
+def _revert(workspace: str | None, temp: str | None) -> int:
+    """Drop the standing capability ACEs a previous run left on these trees.
+
+    Prints JSON and exits 0; any failure prints to stderr and exits 1. The temp
+    ACE is normally revoked by ``dispose()``, so a leftover temp grant means a
+    run died without cleanup — this cleans that up too.
+    """
+    scopes: list[tuple[str, str, str]] = []
+    if workspace:
+        scopes.append(("workspace", workspace, workspace_write_sid(workspace)))
+    if temp:
+        scopes.append(("temp", temp, temp_write_sid(temp)))
+    if not scopes:
+        sys.stderr.write(f"{_REVERT_SIGNATURE}: pass --workspace and/or --temp\n")
+        return 1
+
+    report: dict[str, dict[str, object]] = {}
+    try:
+        for label, path, sid_string in scopes:
+            if not os.path.isdir(path):
+                raise RunnerFailure(f"--{label} is not an existing directory: {path}")
+            report[label] = {
+                "path": canonical_path(path),
+                "sid": sid_string,
+                "removed": revoke_grant(path, sid_string),
+            }
+    except (Win32Error, RunnerFailure, OSError, ValueError) as exc:
+        sys.stderr.write(f"{_REVERT_SIGNATURE}: {exc}\n")
+        return 1
+    print(json.dumps(report, indent=2))
+    return 0
+
+
 def _self_test() -> int:
     """Pure self-test that runs on any platform (no Win32 calls)."""
     assert (
@@ -1251,6 +1312,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     run.add_argument("argv", nargs=argparse.REMAINDER)
     sub.add_parser("probe", help="report availability without touching the host")
+    revert = sub.add_parser("revert", help="drop a capability ACE left on a tree")
+    revert.add_argument(
+        "--workspace", help="workspace root to take the standing ACE off"
+    )
+    revert.add_argument("--temp", help="private temp directory to take the ACE off")
 
     args = parser.parse_args(argv)
     if args.self_test:
@@ -1258,6 +1324,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "probe":
         print(json.dumps(probe(), indent=2))
         return 0
+    if args.command == "revert":
+        return _revert(args.workspace, args.temp)
     if args.command == "run":
         tail = list(args.argv)
         if tail and tail[0] == "--":

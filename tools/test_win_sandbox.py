@@ -75,6 +75,22 @@ def _run_cli(*argv: str) -> subprocess.CompletedProcess:
     )
 
 
+def _has_workspace_ace(path: Path) -> bool:
+    """Read the directory's DACL and ask whether the capability ACE sits on it."""
+    mod = _load()
+    k32, adv = mod._api()
+    sid = mod._parse_sid(adv, mod.workspace_write_sid(str(path)))
+    try:
+        old_acl, descriptor = mod._read_current_dacl(k32, adv, str(path))
+        try:
+            return bool(old_acl) and mod._has_exact_grant(old_acl, sid)
+        finally:
+            if descriptor:
+                k32.LocalFree(ctypes.c_void_p(descriptor))
+    finally:
+        k32.LocalFree(ctypes.c_void_p(sid))
+
+
 # ── pure: path identity and boundaries ───────────────────────────────────────
 
 
@@ -249,6 +265,12 @@ def test_main_self_test_exits_zero(capsys):
     mod = _load()
     assert mod.main(["--self-test"]) == 0
     assert "self-test passed" in capsys.readouterr().out
+
+
+def test_revert_without_a_scope_is_a_usage_error(capsys):
+    mod = _load()
+    assert mod.main(["revert"]) == 1
+    assert "pass --workspace and/or --temp" in capsys.readouterr().err
 
 
 # ── Windows: availability, SID machinery, ACLs, confinement ──────────────────
@@ -461,3 +483,102 @@ def test_runner_reports_a_missing_workspace(tmp_path):
     )
     assert proc.returncode == 127
     assert proc.stderr.startswith("harness-acl-run:")
+
+
+# ── Windows: revert (the way back from the standing workspace ACE) ───────────
+
+
+@WIN_ONLY
+def test_revert_drops_the_ace_a_run_leaves_standing():
+    with _normal_acl_dir() as root:
+        ws, tmp = root / "ws", root / "tmp"
+        ws.mkdir()
+        tmp.mkdir()
+        run = _run_cli(
+            "run",
+            "--workspace",
+            str(ws),
+            "--temp",
+            str(tmp),
+            "--mode",
+            "workspace-write",
+            "--",
+            "cmd",
+            "/c",
+            "echo x> inside.txt",
+        )
+        assert run.returncode == 0
+        assert _has_workspace_ace(ws) is True
+
+        first = _run_cli("revert", "--workspace", str(ws))
+        assert first.returncode == 0
+        assert json.loads(first.stdout)["workspace"]["removed"] is True
+        assert _has_workspace_ace(ws) is False
+
+        # Nothing left to remove is a success, not an error: revert is idempotent.
+        second = _run_cli("revert", "--workspace", str(ws))
+        assert second.returncode == 0
+        assert json.loads(second.stdout)["workspace"]["removed"] is False
+
+
+@WIN_ONLY
+def test_revert_takes_the_temp_ace_off():
+    with _normal_acl_dir() as root:
+        tmp = root / "tmp"
+        tmp.mkdir()
+        mod = _load()
+        k32, adv = mod._api()
+        sid = mod._parse_sid(adv, mod.temp_write_sid(str(tmp)))
+        try:
+            mod.grant_write(str(tmp), sid)
+        finally:
+            k32.LocalFree(ctypes.c_void_p(sid))
+
+        first = _run_cli("revert", "--temp", str(tmp))
+        assert first.returncode == 0
+        assert json.loads(first.stdout)["temp"]["removed"] is True
+        second = _run_cli("revert", "--temp", str(tmp))
+        assert json.loads(second.stdout)["temp"]["removed"] is False
+
+
+@WIN_ONLY
+def test_revert_reports_a_missing_directory(tmp_path):
+    proc = _run_cli("revert", "--workspace", str(tmp_path / "absent"))
+    assert proc.returncode == 1
+    assert proc.stderr.startswith("win_sandbox revert:")
+
+
+# The CLI tests above drive the real seam, but they run in a child process, so
+# coverage cannot see the functions they exercise. These call the same ones
+# in-process — same assertions, visible to the ratchet.
+
+
+@WIN_ONLY
+def test_revoke_grant_reports_presence_then_absence(tmp_path):
+    mod = _load()
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    sid_string = mod.workspace_write_sid(str(ws))
+    k32, adv = mod._api()
+    sid = mod._parse_sid(adv, sid_string)
+    try:
+        mod.grant_write(str(ws), sid)
+    finally:
+        k32.LocalFree(ctypes.c_void_p(sid))
+
+    assert mod.revoke_grant(str(ws), sid_string) is True
+    assert mod.revoke_grant(str(ws), sid_string) is False
+    assert _has_workspace_ace(ws) is False
+
+
+@WIN_ONLY
+def test_revert_in_process_reports_an_absent_grant(tmp_path, capsys):
+    mod = _load()
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    assert mod._revert(str(ws), None) == 0
+    assert json.loads(capsys.readouterr().out)["workspace"]["removed"] is False
+
+    # A missing directory is a refused scope, not a traceback.
+    assert mod._revert(str(tmp_path / "absent"), None) == 1
+    assert capsys.readouterr().err.startswith("win_sandbox revert:")
