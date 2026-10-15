@@ -45,6 +45,10 @@ from typing import Any
 # ── Constants ────────────────────────────────────────────────────────────────
 
 DEFAULT_MODEL = "commandcode/deepseek-v4-pro"
+# The orchestrator runs WITHOUT --auto: that flag auto-approves past its
+# `edit: deny`, so the deny only holds once the flag is gone (measured 2026-10-16:
+# a write landed with the jev agent selected and --auto in play).
+ORCHESTRATOR_AGENT = "jev"
 # OpenCode v2 dropped `opencode/deepseek-v4-flash-free`; the free tier now
 # exposes models such as opencode/mimo-v2.6-flash-free (verified 2026-09-27).
 FREE_MODEL = "opencode/mimo-v2.6-flash-free"
@@ -243,9 +247,11 @@ def run_opencode_cli(
         prompt,
         "--format",
         "json",
-        "--auto",  # auto-approve non-destructive permissions
         "--standalone",  # private server — do not touch the shared user server
     ]
+    if agent != ORCHESTRATOR_AGENT:
+        # Workers need unattended writes; the orchestrator must not have them.
+        cmd.append("--auto")
     if model:  # omitted with --agent, so the agent's own configured model applies
         cmd += ["--model", model]
     if agent:  # e.g. the `jev` orchestrator agent
