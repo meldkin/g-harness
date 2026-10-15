@@ -112,9 +112,16 @@ def record_start(
     pid: int | None = None,
     argv: list[str] | None = None,
     log_path: str | Path | None = None,
+    channel: str | None = None,
+    inbox_path: str | Path | None = None,
     session_dir: str | Path | None = None,
 ) -> str:
-    """Write the opening record, defaulting the pid to this process, and return its id."""
+    """Write the opening record, defaulting the pid to this process, and return its id.
+
+    ``channel``/``inbox_path`` describe how the session can receive mid-run
+    instructions; a session that declares neither is reported as `unsupported`
+    by the controller rather than looking reachable.
+    """
     run_id = uuid.uuid4().hex[:12]
     _write_atomically(
         session_path(run_id, session_dir=session_dir),
@@ -125,6 +132,8 @@ def record_start(
             "pid": os.getpid() if pid is None else pid,
             "argv": list(argv or []),
             "log_path": str(log_path) if log_path else None,
+            "channel": channel,
+            "inbox_path": str(inbox_path) if inbox_path else None,
             "started_at": _now(),
             "finished_at": None,
             "exit_code": None,
