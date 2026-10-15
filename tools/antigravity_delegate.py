@@ -27,7 +27,7 @@ if str(ROOT) not in sys.path:
 from tools.shared_state import SharedState  # noqa: E402
 
 DEFAULT_MODEL = "gemini-3.8-flash-medium"
-DEFAULT_TIMEOUT_SECONDS = 120
+DEFAULT_TIMEOUT_SECONDS = 600
 DIRECTORY_LOCK_ENGINE = "gemini"
 
 GUARDRAIL = """STRICT OPERATING CONSTRAINTS (must follow, no exceptions):

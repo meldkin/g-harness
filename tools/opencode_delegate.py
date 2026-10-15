@@ -235,7 +235,7 @@ def run_opencode_cli(
     model: str,
     directory: str,
     opencode_binary: str,
-    timeout_s: int = 120,
+    timeout_s: int = 900,
     *,
     agent: str | None = None,
     session: str | None = None,
@@ -382,7 +382,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--timeout",
         type=int,
-        default=120,
+        default=900,
         help="Timeout in seconds (default: 120)",
     )
     parser.add_argument(
