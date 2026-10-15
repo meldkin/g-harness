@@ -222,6 +222,258 @@ _PROVIDER_MODELS: dict[str, dict[str, Any]] = {
         "name": "Step 5 Preview",
         "limit": {"context": 1000000, "output": 131072},
     },
+    # commandcode/* catalog extended from model.csv (2026-10-15). `name` and
+    # `context` mirror that file; `output` caps are family estimates, the same
+    # convention as the 2026-10-06 block above. modelIDs verified against the
+    # provider's public catalog (GET {COMMANDCODE_BASE_URL}/models -> 90 ids,
+    # 2026-10-15); three rows were mapped by hand where the CSV name did not match
+    # an id (Tencent Hy4 Preview, Tencent Hy3, MiMo V2.5 Pro-99%). `Jev` is an agent,
+    # not a model, and the CSV's footer row is not a model either.
+    # `output` is capped at 65536 for the non-DeepSeek families below, not 131072:
+    # measured 2026-10-15, declaring 131072 against google/gemini-3.8-flash fails
+    # with "maxOutputTokens value of 131072 but the supported range is from 1
+    # (inclusive) to 65537 (exclusive)" -- the ceiling is a request parameter, so an
+    # over-estimate makes the model unusable rather than merely optimistic.
+    "minimax-m2.5": {
+        "modelID": "MiniMaxAI/MiniMax-M2.5",
+        "name": "MiniMax M2.5",
+        "limit": {"context": 204800, "output": 65536},
+    },
+    "minimax-m2.7": {
+        "modelID": "MiniMaxAI/MiniMax-M2.7",
+        "name": "MiniMax M2.7",
+        "limit": {"context": 204800, "output": 65536},
+    },
+    "minimax-m3": {
+        "modelID": "MiniMaxAI/MiniMax-M3",
+        "name": "MiniMax M3-50%",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "qwen3.6-max-preview": {
+        "modelID": "Qwen/Qwen3.6-Max-Preview",
+        "name": "Qwen 3.6 Max Preview",
+        "limit": {"context": 204800, "output": 65536},
+    },
+    "qwen3.7-flash": {
+        "modelID": "Qwen/Qwen3.7-Flash",
+        "name": "Qwen 3.7 Flash",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "qwen3.7-plus": {
+        "modelID": "Qwen/Qwen3.7-Plus",
+        "name": "Qwen 3.7 Plus",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "qwen3.8-27b": {
+        "modelID": "Qwen/Qwen3.8-27B",
+        "name": "Qwen 3.8 27B",
+        "limit": {"context": 268288, "output": 65536},
+    },
+    "qwen3.8-flash": {
+        "modelID": "Qwen/Qwen3.8-Flash",
+        "name": "Qwen 3.8 Flash",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "qwen3.8-max": {
+        "modelID": "Qwen/Qwen3.8-Max",
+        "name": "Qwen 3.8 Max",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "qwen3.8-max-0902": {
+        "modelID": "Qwen/Qwen3.8-Max-0902",
+        "name": "Qwen 3.8 Max 0902",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "qwen3.8-max-prime": {
+        "modelID": "Qwen/Qwen3.8-Max-Prime",
+        "name": "Qwen 3.8 Max Prime",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "claude-haiku-5-5": {
+        "modelID": "claude-haiku-5-5",
+        "name": "Claude Haiku 5.5",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "deepseek-v4-flash-fast": {
+        "modelID": "deepseek/deepseek-v4-flash-fast",
+        "name": "DeepSeek V4 Flash Fast",
+        "limit": {"context": 1024000, "output": 384000},
+    },
+    "deepseek-v4-flash-vision-exp": {
+        "modelID": "deepseek/deepseek-v4-flash-vision-exp",
+        "name": "DeepSeek V4 Flash Vision (exp)",
+        "limit": {"context": 1024000, "output": 384000},
+    },
+    "gemini-3.7-flash": {
+        "modelID": "google/gemini-3.7-flash",
+        "name": "Gemini 3.7 Flash",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "gemini-3.8-flash": {
+        "modelID": "google/gemini-3.8-flash",
+        "name": "Gemini 3.8 Flash",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "gpt-5.6-luna": {
+        "modelID": "gpt-5.6-luna",
+        "name": "GPT-5.6 Luna",
+        "limit": {"context": 1126400, "output": 128000},
+    },
+    "gpt-5.6-sol": {
+        "modelID": "gpt-5.6-sol",
+        "name": "GPT-5.6 Sol",
+        "limit": {"context": 1126400, "output": 128000},
+    },
+    "ling-3.0-flash-sante": {
+        "modelID": "inclusionai/ling-3.0-flash-sante:free",
+        "name": "Ling 3.0 Flash SanteFree",
+        "limit": {"context": 268288, "output": 65536},
+    },
+    "ling-3.1-flash-paid": {
+        "modelID": "inclusionai/ling-3.1-flash",
+        "name": "Ling 3.1 Flash",
+        "limit": {"context": 268288, "output": 65536},
+    },
+    "longcat-2.0": {
+        "modelID": "meituan/LongCat-2.0",
+        "name": "LongCat 2.0",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "muse-spark-1.2": {
+        "modelID": "meta/muse-spark-1.2",
+        "name": "Muse Spark 1.2",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "muse-spark-1.2-contributor": {
+        "modelID": "meta/muse-spark-1.2-contributor",
+        "name": "Muse Spark 1.2 Contributor",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "muse-spark-1.3-contributor": {
+        "modelID": "meta/muse-spark-1.3-contributor",
+        "name": "Muse Spark 1.3 Contributor",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "mistral-large-4": {
+        "modelID": "mistral/mistral-large-4",
+        "name": "Mistral Large 4",
+        "limit": {"context": 536576, "output": 65536},
+    },
+    "kimi-k2.5": {
+        "modelID": "moonshotai/Kimi-K2.5",
+        "name": "Kimi K2.5",
+        "limit": {"context": 262144, "output": 65536},
+    },
+    "kimi-k2.6": {
+        "modelID": "moonshotai/Kimi-K2.6",
+        "name": "Kimi K2.6",
+        "limit": {"context": 262144, "output": 65536},
+    },
+    "kimi-k2.7-code": {
+        "modelID": "moonshotai/Kimi-K2.7-Code",
+        "name": "Kimi K2.7 Code",
+        "limit": {"context": 262144, "output": 65536},
+    },
+    "kimi-k2.7-code-highspeed": {
+        "modelID": "moonshotai/Kimi-K2.7-Code-Highspeed",
+        "name": "Kimi K2.7 Code HighSpeed",
+        "limit": {"context": 268288, "output": 65536},
+    },
+    "kimi-k3": {
+        "modelID": "moonshotai/Kimi-K3",
+        "name": "Kimi K3",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "nemotron-3-ultra-550b-a55b": {
+        "modelID": "nvidia/nemotron-3-ultra-550b-a55b",
+        "name": "Nemotron 3 Ultra",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "laguna-s-2.1-free": {
+        "modelID": "poolside/laguna-s-2.1-free",
+        "name": "Laguna S 2.1Free",
+        "limit": {"context": 262144, "output": 65536},
+    },
+    "glyph-cluster": {
+        "modelID": "stealth/glyph-cluster:free",
+        "name": "Glyph ClusterFree",
+        "limit": {"context": 262144, "output": 65536},
+    },
+    "step-3.5-flash": {
+        "modelID": "stepfun/Step-3.5-Flash",
+        "name": "Step 3.5 Flash",
+        "limit": {"context": 268288, "output": 65536},
+    },
+    "step-3.7-flash": {
+        "modelID": "stepfun/Step-3.7-Flash",
+        "name": "Step 3.7 Flash",
+        "limit": {"context": 262144, "output": 65536},
+    },
+    "hy3-paid": {
+        "modelID": "tencent/hy3-paid",
+        "name": "Tencent Hy3",
+        "limit": {"context": 268288, "output": 65536},
+    },
+    "hy4-preview": {
+        "modelID": "tencent/hy4-preview",
+        "name": "Tencent Hy4 Preview",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "inkling": {
+        "modelID": "thinkingmachines/inkling",
+        "name": "Inkling",
+        "limit": {"context": 262144, "output": 65536},
+    },
+    "inkling-small": {
+        "modelID": "thinkingmachines/inkling-small",
+        "name": "Inkling Small",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "grok-4.5": {
+        "modelID": "xai/grok-4.5",
+        "name": "Grok 4.5",
+        "limit": {"context": 512000, "output": 65536},
+    },
+    "grok-4.6": {
+        "modelID": "xai/grok-4.6",
+        "name": "Grok 4.6",
+        "limit": {"context": 512000, "output": 65536},
+    },
+    "mimo-v2.5": {
+        "modelID": "xiaomi/mimo-v2.5",
+        "name": "MiMo V2.5-98%",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "mimo-v2.5-pro": {
+        "modelID": "xiaomi/mimo-v2.5-pro",
+        "name": "MiMo V2.5 Pro-99%",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "mimo-v2.6-pro-ultraspeed": {
+        "modelID": "xiaomi/mimo-v2.6-pro-ultraspeed",
+        "name": "MiMo V2.6 Pro UltraSpeed",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "glm-5.3-flash": {
+        "modelID": "z-ai/glm-5.3-flash",
+        "name": "GLM-5.3 Flash",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "glm-5.2": {
+        "modelID": "zai-org/GLM-5.2",
+        "name": "GLM-5.2",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "glm-5.2-fast": {
+        "modelID": "zai-org/GLM-5.2-Fast",
+        "name": "GLM-5.2 Fast",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "glm-5.3": {
+        "modelID": "zai-org/GLM-5.3",
+        "name": "GLM-5.3",
+        "limit": {"context": 1024000, "output": 65536},
+    },
 }
 
 # Official DeepSeek API provider (plan.md A1). OpenAI-compatible endpoint fed by
@@ -271,6 +523,18 @@ _OPENROUTER_MODELS: dict[str, dict[str, Any]] = {
         "modelID": "deepseek/deepseek-v4-flash-vision-exp",
         "name": "DeepSeek V4 Flash Vision Exp (OpenRouter)",
         "limit": {"context": 1048576, "output": 384000},
+    },
+    # The model named "Jev": TypeSafe's router, which picks a model and a reasoning
+    # effort per request. Verified callable 2026-10-15 -- a trivial prompt returned
+    # 200 and the router reported `model: deepseek/deepseek-v4.1-flash`, i.e. it
+    # did the dispatch itself. OpenRouter prices it dynamically (-1 per token)
+    # because the cost depends on the model chosen; its reported context is 1M,
+    # while the harness's model.csv row (32K, $0.04/$0.00) describes the underlying
+    # Jev system model rather than this router.
+    "jev-router": {
+        "modelID": "typesafe/jev-router",
+        "name": "Jev Router (TypeSafe)",
+        "limit": {"context": 1000000, "output": 131072},
     },
 }
 
@@ -355,13 +619,18 @@ def collect_disabled_skills(kilo_root: Path) -> dict[str, str]:
             continue
         for line in fm.splitlines():
             key, _, value = line.partition(":")
-            if key.strip() == "disable-model-invocation" and value.strip().lower() == "true":
+            if (
+                key.strip() == "disable-model-invocation"
+                and value.strip().lower() == "true"
+            ):
                 out[skill_dir.name] = _DISABLED_SKILL_PERMISSION
                 break
     return out
 
 
-def _parse_permission_block(frontmatter: str) -> tuple[list[str], list[tuple[str, list[tuple[str, str]]]]]:
+def _parse_permission_block(
+    frontmatter: str,
+) -> tuple[list[str], list[tuple[str, list[tuple[str, str]]]]]:
     """Split an agent frontmatter into (kept lines, permission entries).
 
     `kept lines` are every frontmatter line outside the `permission:` block,
@@ -427,7 +696,9 @@ def _render_permissions(entries: list[tuple[str, list[tuple[str, str]]]]) -> lis
         if action in _DROP_PERMISSION_KEYS:
             continue
         mapped = _PERMISSION_ACTION_RENAME.get(action, action)
-        ordered = [c for c in children if c[0] == "*"] + [c for c in children if c[0] != "*"]
+        ordered = [c for c in children if c[0] == "*"] + [
+            c for c in children if c[0] != "*"
+        ]
         for resource, effect in ordered:
             if not effect:
                 continue
@@ -508,7 +779,9 @@ def prune_duplicate_skills(kilo_root: Path, opencode_root: Path) -> int:
     for d in sorted(p for p in dst.iterdir() if p.is_dir()):
         if d.name in kilo_ids:
             shutil.rmtree(d)
-            print(f"  [PRUNE] skills/{d.name}/ (mirrors .kilo/skill — already in .claude/skills)")
+            print(
+                f"  [PRUNE] skills/{d.name}/ (mirrors .kilo/skill — already in .claude/skills)"
+            )
             removed += 1
     if not removed:
         print("  [OK] no skill mirror to prune")
@@ -704,15 +977,25 @@ def generate_opencode_json(
         },
     }
     opencode_root.mkdir(parents=True, exist_ok=True)
-    _write_if_changed(root_dir / "opencode.json", json.dumps(root_config, indent=2) + "\n")
-    _write_if_changed(opencode_root / "opencode.json", json.dumps(local_config, indent=2) + "\n")
-    note = f" ({len(disabled_skills)} skill permission rule(s))" if disabled_skills else ""
+    _write_if_changed(
+        root_dir / "opencode.json", json.dumps(root_config, indent=2) + "\n"
+    )
+    _write_if_changed(
+        opencode_root / "opencode.json", json.dumps(local_config, indent=2) + "\n"
+    )
+    note = (
+        f" ({len(disabled_skills)} skill permission rule(s))" if disabled_skills else ""
+    )
     print(f"OpenCode config generated: opencode.json + .opencode/opencode.json{note}")
     return 0
 
 
 def generate_all(
-    kilo_root: Path, opencode_root: Path, root_dir: Path, *, skip_names: set[str] | None = None
+    kilo_root: Path,
+    opencode_root: Path,
+    root_dir: Path,
+    *,
+    skip_names: set[str] | None = None,
 ) -> int:
     # skip_names is retained for call-site compatibility; this engine no longer
     # mirrors skills (see prune_duplicate_skills).
@@ -733,6 +1016,11 @@ def generate_all(
     if generate_instruction_skills(kilo_root, opencode_root) != 0:
         return 1
     print("--- OpenCode config ---")
-    if generate_opencode_json(opencode_root, root_dir, collect_disabled_skills(kilo_root)) != 0:
+    if (
+        generate_opencode_json(
+            opencode_root, root_dir, collect_disabled_skills(kilo_root)
+        )
+        != 0
+    ):
         return 1
     return 0
