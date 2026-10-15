@@ -71,7 +71,7 @@ Nếu plugin bắt đầu chứa code tự dựng lại native capability → v�
 - **Fallback:** khi Codex không ổn định, **DeepSeek viết brief và thẩm tra lại kết quả của Gemini**; Jev vẫn điều phối.
 - Jev **chỉ điều phối**: `edit: deny` trong agent config, và wrapper chạy agent này **không kèm `--auto`** để deny có hiệu lực thật.
 - Verify live 2026-10-16: Jev→Codex `CODEX_VIA_JEV_OK` · DeepSeek `DEEPSEEK_ARM_OK` · Gemini `GEMINI_ARM_OK` · Codex trực tiếp `CODEX_ARM_OK`, và trả đúng `DEFAULT_MODEL=gpt-6.1-sol DEFAULT_EFFORT=medium`.
-- **Giới hạn đã đo:** nhánh DeepSeek **từ chối task tài liệu quy mô lớn** (2 lần liên tiếp không ghi file: một lần exit 2, một lần hỏi lại "viết vào đâu") — dùng nó cho task hẹp với đường dẫn đích tường minh. Nhánh dsh **chưa verify** (cần `CI=true` + `pnpm build`).
+- **Giới hạn đã đo:** nhánh DeepSeek **từ chối task tài liệu quy mô lớn** (2 lần liên tiếp không ghi file: một lần exit 2, một lần hỏi lại "viết vào đâu") — dùng nó cho task hẹp với đường dẫn đích tường minh. Nhánh **dsh đã verify 2026-10-16** (`DSH_ARM_OK`, 7s) sau 3 điều kiện: `pnpm build` trong checkout, `DSH_CLIENT_COMMIT_HASH` (checkout không có `.git`), và **bỏ `DEEPSEEK_BASE_URL`** khỏi môi trường (nếu còn, dsh 404 vì protocol `messages` của nó).
 
 ## 1. Cấu trúc thư mục [HARD]
 

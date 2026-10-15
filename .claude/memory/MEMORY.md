@@ -87,7 +87,8 @@ High-signal context loaded at session start. Detailed history belongs in
   raised baselines; detail in `decisions-archive.md`.
 - [decision] GUI worker console (2026-10-07): full detail in `decisions-archive.md`
   (loopback-only stdlib web app in `tools/gui_server.py`, `.env` key NAMES only).
-- [decision] dsh worker verified (2026-10-07): detail in `decisions-archive.md`.
+- [decision] dsh worker verified (2026-10-07): detail in `decisions-archive.md`;
+  re-verified 2026-10-16 (`DSH_ARM_OK`) sau `pnpm build`, `DSH_CLIENT_COMMIT_HASH`, và bỏ `DEEPSEEK_BASE_URL`.
 - [decision] Pipeline 4 vai trò (2026-10-16): Jev (agent trên **model JEV**
   `openrouter/jev-router`) điều phối; **Codex** ra đề bài + **verify** (`gpt-6.1-sol`,
   effort `medium`, đổi bằng `--model`/`--effort`); **DeepSeek V4.1 Flash** (OpenCode CLI,
