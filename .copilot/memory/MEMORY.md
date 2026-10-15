@@ -84,16 +84,9 @@ High-signal context loaded at session start. Detailed history belongs in
   operator-confirmed 2026-10-07): a headless child session has no prompt
   channel, so `effect: ask` silently permits -- the operator saw no dialog
   appear during a two-command probe. Use explicit `allow`/`deny`; never `ask`.
-- [decision] Guard hardening (2026-10-07): 33 -> 41 destructive patterns in
-  `.claude/hooks/guard.py` + `.kilo/hooks/pre-tool-use/gate-guard.js`. Eight
-  verified holes closed; independent Codex (gpt-6.1-sol) review rounds ran,
-  and every self-inflicted regression they found was fixed (over-blocks on quoted
-  searches / `./build` / `..`-named files; `bash -c` and wrapped-`curl|bash`
-  divergences). New patterns anchor to command position, and Kilo gained a
-  `normalizeCommand` port so both engines unwrap `sudo`/`env`/`bash -c` alike.
-  Pre-existing gaps still open, and the full finding list, are in
-  `decisions-archive.md`. The checklist Pytest timeout rose 120s -> 300s (suite
-  ~95-130s on Windows).
+- [decision] Guard hardening (2026-10-07): 33 -> 41 destructive patterns, 8 verified
+  holes closed, Codex review rounds; the full finding list is in `decisions-archive.md`.
+  The checklist Pytest timeout rose 120s -> 300s (suite ~95-130s on Windows).
 - [decision] Coverage (2026-10-07): every file that started at 0.0% (13 total)
   now has tests and the ratchet baseline is raised. `pre-commit` is installed and
   its git hook is active.
@@ -123,3 +116,9 @@ High-signal context loaded at session start. Detailed history belongs in
   vs `.copilot`/`.gemini`) and "Agent tools drift" (derived `.claude` `tools:`);
   the old `check_agents` compared filenames only and reported clean while the
   engines disagreed (2026-10-07).
+- [decision] Worker confinement (2026-10-14): `tools/win_sandbox.py` confines a
+  worker subtree with a Windows ACL restricted token; verified by 4 probes +
+  `icacls` and 31 tests. **Not wired** — no delegate/console calls it yet, so G5 is
+  a mechanism, not enforcement. `revert --workspace|--temp` drops the standing
+  capability ACE a run leaves behind. Gotcha: a CLI path exercised only via
+  subprocess is invisible to coverage. Budget: keep the keyless `test_e2e` number.

@@ -653,3 +653,14 @@ Two fixes came out of the real run:
   `.env`; it passes through only from the process environment.
 
 Result: a real run returned the exact marker `DSH_E2E_OK` with exit 0.
+
+## Guard hardening summary (moved out of MEMORY.md, 2026-10-15)
+
+33 -> 41 destructive patterns in `.claude/hooks/guard.py` +
+`.kilo/hooks/pre-tool-use/gate-guard.js`. Eight verified holes closed; independent
+Codex (gpt-6.1-sol) review rounds ran, and every self-inflicted regression they
+found was fixed (over-blocks on quoted searches / `./build` / `..`-named files;
+`bash -c` and wrapped-`curl|bash` divergences). New patterns anchor to command
+position, and Kilo gained a `normalizeCommand` port so both engines unwrap
+`sudo`/`env`/`bash -c` alike. Pre-existing gaps still stay open; the full finding
+list is the "Guard hardening: full finding list" section above.
