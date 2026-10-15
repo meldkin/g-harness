@@ -14,14 +14,32 @@ Usage:
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+TOOLS = Path(__file__).resolve().parent
+for _entry in (str(ROOT), str(TOOLS)):
+    sys.path.insert(0, _entry)
+
+import session_registry  # noqa: E402
 
 from tools import kilo_cli_delegate  # noqa: E402
+
+
+def _registry():
+    """The registry module the delegate imports, so both share one object."""
+    return session_registry
+
+
+@pytest.fixture(autouse=True)
+def _registry_into_tmp(tmp_path, monkeypatch):
+    """No unit test may write session records into the repo's .solocode/."""
+    monkeypatch.setattr(session_registry, "SESSION_DIR", tmp_path)
 
 
 def test_is_batch_shim_detects_cmd_and_bat_on_windows():
@@ -121,3 +139,106 @@ def test_make_streams_encoding_safe_tolerates_missing_reconfigure(monkeypatch):
     monkeypatch.setattr(kilo_cli_delegate.sys, "stderr", Bare())
 
     kilo_cli_delegate._make_streams_encoding_safe()
+
+
+# ── run_kilo_cli + registry wiring (gap G7) ──────────────────────────────────
+
+
+class _FakePopen:
+    """A Popen stand-in: pid for the registry, communicate() for the streams."""
+
+    def __init__(
+        self,
+        stdout: str = "",
+        stderr: str = "",
+        returncode: int = 0,
+        pid: int = 7170,
+        timeout: bool = False,
+    ) -> None:
+        self.pid = pid
+        self.returncode = None
+        self._stdout = stdout
+        self._stderr = stderr
+        self._returncode = returncode
+        self._timeout = timeout
+
+    def communicate(self, timeout: int | None = None):
+        if self._timeout:
+            # One-shot: the timeout path kills the tree, so the next communicate()
+            # returns instead of raising again.
+            self._timeout = False
+            raise subprocess.TimeoutExpired(cmd="kilo", timeout=timeout or 0)
+        self.returncode = self._returncode
+        return self._stdout, self._stderr
+
+
+def _run(monkeypatch, mod, proc):
+    monkeypatch.setattr(mod.subprocess, "Popen", lambda *_a, **_k: proc)
+    return mod.run_kilo_cli(
+        prompt="x",
+        model="m",
+        server_url="http://127.0.0.1:1",
+        directory=".",
+        kilo_binary="kilo",
+        timeout_s=5,
+    )
+
+
+def test_run_kilo_cli_records_the_session_and_settles_it(monkeypatch, tmp_path):
+    registry = _registry()
+    stream = '{"type":"text","part":{"text":"PONG"}}'
+    result = _run(monkeypatch, kilo_cli_delegate, _FakePopen(stdout=stream))
+    assert result["text"] == "PONG"
+
+    sessions = registry.list_sessions(session_dir=tmp_path)
+    assert len(sessions) == 1
+    assert sessions[0]["worker"] == "kilo"
+    assert sessions[0]["pid"] == 7170
+    assert sessions[0]["state"] == "exited"
+
+
+def test_run_kilo_cli_timeout_kills_the_tree_and_records_it(monkeypatch, tmp_path):
+    registry = _registry()
+    killed: list[int] = []
+    monkeypatch.setattr(
+        kilo_cli_delegate,
+        "_load_sibling",
+        lambda name: (
+            SimpleNamespace(kill_tree=lambda pid: killed.append(pid) or [pid])
+            if name == "session_control"
+            else session_registry
+        ),
+    )
+    result = _run(monkeypatch, kilo_cli_delegate, _FakePopen(timeout=True))
+
+    assert result["error"] == "Timeout after 5s"
+    assert killed == [7170]
+    assert registry.list_sessions(session_dir=tmp_path)[0]["state"] == "timeout"
+
+
+def test_run_kilo_cli_launch_failure_records_no_session(monkeypatch, tmp_path):
+    registry = _registry()
+
+    def boom(*_a, **_k):
+        raise OSError("no kilo")
+
+    monkeypatch.setattr(kilo_cli_delegate.subprocess, "Popen", boom)
+    result = kilo_cli_delegate.run_kilo_cli(
+        prompt="x",
+        model="m",
+        server_url="http://127.0.0.1:1",
+        directory=".",
+        kilo_binary="kilo",
+        timeout_s=5,
+    )
+    assert result["error"] == "no kilo"
+    assert registry.list_sessions(session_dir=tmp_path) == []
+
+
+def test_run_kilo_cli_reports_a_nonzero_exit_without_output(monkeypatch, tmp_path):
+    result = _run(
+        monkeypatch,
+        kilo_cli_delegate,
+        _FakePopen(returncode=3, stderr="boom"),
+    )
+    assert result["error"] == "kilo CLI exit code 3"
