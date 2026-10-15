@@ -673,3 +673,23 @@ plus their wrappers, lists the provider/model catalog and `.env` key NAMES (neve
 values), and runs a brief through the matching `*_delegate.py`. Loopback-only,
 per-run token, worker+model allowlist. Codex is wired too
 (`tools/codex_delegate.py`, read-only default).
+
+## Coverage (2026-10-07)
+
+Every file that started at 0.0% (13 total) now has tests and the ratchet baseline
+is raised. `pre-commit` is installed and its git hook is active.
+
+## Subagent seam (2026-10-07)
+
+`tools/subagent_cli.py` is the Provider for the Protocol in
+`tools/subagent_seam.py` — a `CliProvider` over the delegate wrappers (evidence
+split from summary) plus a capability/rank dispatcher; `write` is deliberately
+not advertised. Harness version bumped to 4.3.0 across `.harness.lock`,
+`agent.yaml` and `pyproject.toml`.
+
+## Garden agent checks (2026-10-07)
+
+Garden gained "Permission drift" (agent `permission:` block vs `.copilot`/`.gemini`)
+and "Agent tools drift" (derived `.claude` `tools:`); the old `check_agents`
+compared filenames only and reported clean while the engines disagreed. Subagent
+reviewers hold `read` + `edit`, and `code-reviewer` has no shell.

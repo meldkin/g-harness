@@ -87,9 +87,8 @@ High-signal context loaded at session start. Detailed history belongs in
 - [decision] Guard hardening (2026-10-07): 33 -> 41 destructive patterns, 8 verified
   holes closed, Codex review rounds; the full finding list is in `decisions-archive.md`.
   The checklist Pytest timeout rose 120s -> 300s (suite ~95-130s on Windows).
-- [decision] Coverage (2026-10-07): every file that started at 0.0% (13 total)
-  now has tests and the ratchet baseline is raised. `pre-commit` is installed and
-  its git hook is active.
+- [decision] Coverage (2026-10-07): the 13 files that started at 0.0% have tests and
+  raised baselines; detail in `decisions-archive.md`.
 - [decision] GUI worker console (2026-10-07): full detail in `decisions-archive.md`
   (loopback-only stdlib web app in `tools/gui_server.py`, `.env` key NAMES only).
 - [decision] dsh worker verified (2026-10-07): `tools/dsh_delegate.py` drives dsh
@@ -102,16 +101,12 @@ High-signal context loaded at session start. Detailed history belongs in
   brief to a file because the Windows npm shim truncates multi-line arguments, and
   returns a post-run git status/diffstat. Codex has no project hooks, so
   `tools/codex_guard.py` stays the separate preflight.
-- [decision] Subagent seam implemented (2026-10-07): `tools/subagent_cli.py` is
-  the Provider for the Protocol in `tools/subagent_seam.py` — a `CliProvider` over
-  the delegate wrappers (evidence split from summary) plus a capability/rank
-  dispatcher; `write` is deliberately not advertised. Harness version bumped to
-  4.3.0 across `.harness.lock`, `agent.yaml` and `pyproject.toml`.
-- [decision] Subagent reviewers hold `read` + `edit`, no shell for
-  `code-reviewer`. Garden gained "Permission drift" (agent `permission:` block
-  vs `.copilot`/`.gemini`) and "Agent tools drift" (derived `.claude` `tools:`);
-  the old `check_agents` compared filenames only and reported clean while the
-  engines disagreed (2026-10-07).
+- [decision] Subagent seam implemented (2026-10-07): `tools/subagent_cli.py` provides
+  the Protocol in `tools/subagent_seam.py`; `write` is deliberately not advertised.
+  Version 4.3.0; full detail in `decisions-archive.md`.
+- [decision] Subagent reviewers hold `read` + `edit`, no shell for `code-reviewer`
+  (2026-10-07). Garden's "Permission drift" and "Agent tools drift" checks, and the
+  filename-only `check_agents` they replaced, are in `decisions-archive.md`.
 - [decision] Worker confinement mechanism (2026-10-14): `tools/win_sandbox.py` —
   Windows ACL restricted token, `--also-write` để cấp thêm root ghi, `revert` để gỡ
   ACE; verify bằng `icacls`. Gotcha: đường CLI chỉ chạy qua subprocess thì coverage
@@ -121,3 +116,8 @@ High-signal context loaded at session start. Detailed history belongs in
   (`SEC_E_NO_CREDENTIALS`) ⇒ không bọc được worker nào của fleet (mọi worker gọi
   API). `--confine` trong `codex_delegate` bị chặn có chủ ý; nếu cần cách ly →
   AppContainer (chưa làm). Việc kế: G7/P2.2 (spec `plan.md` §4.1).
+- [decision] G7 control plane (2026-10-15): `tools/session_registry.py` +
+  `tools/session_control.py` (`list`/`send`/`interrupt`); `opencode_delegate` đã ghi
+  registry (Popen để lộ pid). **Race thật**: interrupt bị delegate ghi đè thành
+  `exited` → sửa bằng claim `interrupting` trước khi giết. `send_message` chỉ cho
+  phiên khai báo kênh (hiện chưa có). Delegate còn lại chưa nối.
