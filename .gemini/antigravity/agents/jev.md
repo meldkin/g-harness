@@ -2,6 +2,7 @@
 description: Jev — multi-worker orchestrator. Routes a task to the cheapest capable worker (DeepSeek V4.1 Flash for reasoning, Gemini/Antigravity for broad reads, Codex for independent review, OpenCode CLI for mechanical edits) and verifies every result before trusting it.
 mode: primary
 color: "#8B5CF6"
+model: openrouter/jev-router
 steps: 40
 permission:
   read: allow

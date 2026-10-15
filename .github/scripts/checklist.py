@@ -164,6 +164,12 @@ def main():
     parser = argparse.ArgumentParser(description="Master validation checklist")
     parser.add_argument("project", help="Project path to validate")
     parser.add_argument("--url", help="URL for performance checks")
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Skip the coverage ratchet (it re-runs the whole suite, ~3 min). Use "
+        "while iterating; run the full gate before a commit.",
+    )
     args = parser.parse_args()
 
     project_path = Path(args.project).resolve()
@@ -273,7 +279,7 @@ def main():
     else:
         print_warning("No tools/ test suite found, skipping pytest")
 
-    coverage_result = coverage_ratchet_check(project_path)
+    coverage_result = None if args.fast else coverage_ratchet_check(project_path)
     if coverage_result is not None:
         results.append(coverage_result)
 

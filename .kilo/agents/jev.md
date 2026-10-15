@@ -2,6 +2,7 @@
 description: Jev — multi-worker orchestrator. Routes a task to the cheapest capable worker (DeepSeek V4.1 Flash for reasoning, Gemini/Antigravity for broad reads, Codex for independent review, OpenCode CLI for mechanical edits) and verifies every result before trusting it.
 mode: primary
 color: "#8B5CF6"
+model: openrouter/jev-router
 steps: 40
 permission:
   read: allow
@@ -51,12 +52,18 @@ pick the cheapest worker that can finish it, then verify the result.
 
 | Work shape | Worker | How |
 |---|---|---|
-| Deep reasoning, code writing, design-adjacent | **DeepSeek V4.1 Flash** | `python tools/opencode_delegate.py "<task>" --model commandcode/deepseek-v4.1-flash` |
-| Read >5 files, repo-wide survey, independent review | **Gemini / Antigravity CLI** | `python tools/antigravity_delegate.py "<task>" --allow-tools --model gemini-3.8-flash-medium` |
-| Independent review of a diff, or a second opinion | **Codex / ChatGPT** | `python tools/codex_delegate.py "<task>"` (read-only sandbox by default) |
+| **Write code** (implement, refactor, fix a bug) | **Codex / ChatGPT** | `python tools/codex_delegate.py "<task>" --allow-write` (read-only without the flag) |
+| Review a diff, second opinion on code | **Codex / ChatGPT** | `python tools/codex_delegate.py "<task>"` (read-only sandbox by default) |
+| DeepSeek work: reasoning, analysis, bulk reading, mechanical edits | **DeepSeek V4.1 Flash via OpenCode CLI** | `python tools/opencode_delegate.py "<task>" --model commandcode/deepseek-v4.1-flash` |
+| DeepSeek-native heavier runs (dsh is the harness built for DeepSeek) | **dsh** | `python tools/dsh_delegate.py "<task>"` (needs its environment set up — see below) |
+| Read >5 files, repo-wide survey | **Gemini / Antigravity CLI** | `python tools/antigravity_delegate.py "<task>" --allow-tools --model gemini-3.8-flash-medium` |
 | Small mechanical edit, boilerplate, one test | **OpenCode CLI** | `python tools/opencode_delegate.py "<task>"` |
-| DeepSeek-native, heavier runs | **dsh** (verified 2026-10-07) | `python tools/dsh_delegate.py "<task>"` |
 | Architecture, product, security decision | **Here** | Judgment is not delegable |
+
+Jev itself runs on the **JEV model** (`openrouter/jev-router`, TypeSafe's router). Its
+job is to receive the task, split it, route each part through the table above, and
+verify what comes back — it does not write the code itself. The whole harness is
+shaped for two things: **ChatGPT doing the code**, and **Jev doing the routing**.
 
 The OpenCode wrapper also reaches the DeepSeek **strong** tier with
 `--model commandcode/deepseek-v4-pro`. Pick the Antigravity tier by complexity:

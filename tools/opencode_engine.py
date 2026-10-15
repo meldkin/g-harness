@@ -538,6 +538,25 @@ _OPENROUTER_MODELS: dict[str, dict[str, Any]] = {
     },
 }
 
+# The Jev agent runs on the model named Jev: TypeSafe's `typesafe/jev-router` on
+# OpenRouter, which picks a model and reasoning effort per request (verified live
+# 2026-10-15 -- it answered and reported routing to deepseek/deepseek-v4.1-flash).
+# Keeping it separate from _DEFAULT_MODEL matters: the default is what every other
+# run uses, while this one is the orchestrator's own brain.
+_JEV_AGENT_MODEL = "openrouter/jev-router"
+# Operator rule (2026-10-15): when the Jev model cannot be loaded, the agent runs
+# on DeepSeek V4.1 Flash -- the harness's default *executor* -- not on the
+# orchestrator default (V4 Pro).
+_JEV_AGENT_FALLBACK = "commandcode/deepseek-v4.1-flash"
+
+
+def _build_agent_models() -> dict[str, dict[str, str]]:
+    """Per-agent model overrides, with the operator's fallback applied."""
+    if "jev-router" in _OPENROUTER_MODELS:
+        return {"jev": {"model": _JEV_AGENT_MODEL}}
+    return {"jev": {"model": _JEV_AGENT_FALLBACK}}
+
+
 # Ordered shell allow/deny rules for the legacy `permission.bash` object.
 #
 # Why the legacy shape: the host IDE (Kilo Code 7.8.1) bundles OpenCode v1 in
@@ -926,7 +945,7 @@ def generate_opencode_json(
         "model": _DEFAULT_MODEL,
         "small_model": _SMALL_MODEL,
         "default_agent": "jev",
-        "agents": {"jev": {"model": _DEFAULT_MODEL}},
+        "agents": _build_agent_models(),
         "permission": permission,
     }
     local_config: dict[str, Any] = {

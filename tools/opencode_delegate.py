@@ -241,19 +241,21 @@ def run_opencode_cli(
         opencode_binary,
         "run",
         prompt,
-        "--model",
-        model,
         "--format",
         "json",
         "--auto",  # auto-approve non-destructive permissions
         "--standalone",  # private server — do not touch the shared user server
     ]
+    if model:  # omitted with --agent, so the agent's own configured model applies
+        cmd += ["--model", model]
     if agent:  # e.g. the `jev` orchestrator agent
         cmd += ["--agent", agent]
     if session:  # continue (or create) a session, for a conversation
         cmd += ["--session", session]
 
-    _stderr(f"Running: opencode run ... --model {model} --format json --auto")
+    _stderr(
+        f"Running: opencode run ... --model {model or '(agent default)'} --format json --auto"
+    )
 
     registry = _load_sibling("session_registry")
     try:
@@ -272,7 +274,12 @@ def run_opencode_cli(
 
     # The pid is what makes the session interruptible later, which is why the
     # record is written only after Popen succeeded and carries proc.pid.
-    run_id = registry.record_start("opencode", model=model, pid=proc.pid, argv=cmd)
+    run_id = registry.record_start(
+        "opencode",
+        model=model or (f"agent:{agent}" if agent else None),
+        pid=proc.pid,
+        argv=cmd,
+    )
 
     timed_out = False
     try:
@@ -348,8 +355,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--model",
-        default=DEFAULT_MODEL,
-        help=f"Model in provider/model format (default: {DEFAULT_MODEL})",
+        default=None,
+        help=f"Model in provider/model format (default: {DEFAULT_MODEL}; omitted "
+        "with --agent so the agent's own model applies)",
     )
     parser.add_argument(
         "--directory",
@@ -393,8 +401,18 @@ def main(argv: list[str] | None = None) -> int:
 
     _stderr(f"Using OpenCode binary: {opencode_binary}")
 
-    # ── Override model if --free ──
-    model = FREE_MODEL if args.free else args.model
+    # ── Resolve the model ──
+    # With an agent and no explicit model, send no `--model` at all so the agent's
+    # own configuration decides (the `jev` agent runs on openrouter/jev-router);
+    # otherwise the harness default applies.
+    if args.free:
+        model = FREE_MODEL
+    elif args.model:
+        model = args.model
+    elif args.agent:
+        model = None
+    else:
+        model = DEFAULT_MODEL
 
     # ── Prepend guardrail unless disabled ──
     prompt = args.prompt
@@ -416,7 +434,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     elapsed = time.monotonic() - start
 
-    log_usage(model, len(prompt), elapsed, result)
+    log_usage(model or f"agent:{args.agent}", len(prompt), elapsed, result)
 
     # ── Output ──
     if result.get("error"):

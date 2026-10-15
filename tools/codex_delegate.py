@@ -42,6 +42,7 @@ import subprocess  # noqa: S404 — fixed argv; the browser/task cannot inject
 import sys
 import tempfile
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -51,6 +52,10 @@ LAUNCHER = ROOT / "codex-env.ps1"
 USAGE_LOG = ROOT / ".solocode" / "codex-delegate-usage.jsonl"
 DEFAULT_TIMEOUT = 900
 DEFAULT_MODEL = "gpt-6.1-sol"
+# Codex accepts `-c key=value` overrides; this is the reasoning effort the harness
+# asks for by default. Both values are CLI-changeable, so the routing table can
+# name a different model or effort without touching this file.
+DEFAULT_EFFORT = "medium"
 # Codex resolves its provider config from ~/.codex/config.toml and writes session
 # and log state there. Reads are unrestricted inside the sandbox, so only the
 # write half needs this grant.
@@ -112,6 +117,7 @@ def build_plan(
     task: str,
     *,
     model: str | None = None,
+    effort: str | None = None,
     allow_write: bool = False,
     brief_file: Path,
     out_file: Path,
@@ -147,6 +153,8 @@ def build_plan(
     ]
     if model:
         argv += ["-m", model]
+    if effort:
+        argv += ["-c", f'model_reasoning_effort="{effort}"']
     argv.append(
         f"Read the file {brief_file} and carry out the task it contains exactly. "
         "It is your complete brief."
@@ -265,7 +273,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Codex (ChatGPT) worker delegate")
     parser.add_argument("task", help="self-contained task brief")
     parser.add_argument(
-        "--model", default=None, help=f"Codex model (default {DEFAULT_MODEL})"
+        "--model",
+        default=DEFAULT_MODEL,
+        help=f"Codex model (default {DEFAULT_MODEL})",
+    )
+    parser.add_argument(
+        "--effort",
+        default=DEFAULT_EFFORT,
+        choices=["low", "medium", "high"],
+        help=f"Reasoning effort passed as -c model_reasoning_effort (default {DEFAULT_EFFORT})",
     )
     parser.add_argument(
         "--allow-write",
@@ -341,12 +357,21 @@ def main(argv: list[str] | None = None) -> int:
         if args.allow_write:
             confine_roots = default_confine_roots() + list(args.confine_also_write)
 
+    # Codex runs inside its own sandbox rooted at the workspace, and that sandbox
+    # denies reads outside it: a brief written to %TEMP% came back "denied by the
+    # filesystem restrictions" and the worker never saw the task (measured
+    # 2026-10-16 through a Jev dispatch). Brief and answer stay inside the
+    # workspace; %TEMP% remains the private temp dir --confine needs, since that one
+    # must be disjoint from the workspace.
     tmp = Path(tempfile.mkdtemp(prefix="codex-delegate-"))
-    brief_file = tmp / "brief.md"
-    out_file = tmp / "last-message.md"
+    brief_dir = ROOT / ".solocode" / "codex-briefs" / uuid.uuid4().hex[:12]
+    brief_dir.mkdir(parents=True, exist_ok=True)
+    brief_file = brief_dir / "brief.md"
+    out_file = brief_dir / "last-message.md"
     plan = build_plan(
         args.task,
         model=args.model,
+        effort=args.effort,
         allow_write=args.allow_write,
         brief_file=brief_file,
         out_file=out_file,

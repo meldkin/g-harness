@@ -5,7 +5,7 @@
   "default_agent": "jev",
   "agents": {
     "jev": {
-      "model": "commandcode/deepseek-v4-pro"
+      "model": "openrouter/jev-router"
     }
   },
   "permission": {
