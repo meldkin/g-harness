@@ -26,6 +26,7 @@ import os
 import subprocess  # noqa: S404 — fixed argv, no shell
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 TOOLS_DIR = Path(__file__).resolve().parent
@@ -200,6 +201,59 @@ def find(run_id: str, *, session_dir: str | Path | None = None) -> dict | None:
     return None
 
 
+def prune(
+    *,
+    older_than_days: float,
+    session_dir: str | Path | None = None,
+    dry_run: bool = False,
+) -> dict[str, object]:
+    """Delete settled records older than the cutoff; never a live session.
+
+    Records accumulate on their own — every keyed e2e run that drives a delegate
+    for real writes one — and nothing else trims them. A record is only prunable
+    once it is settled: `running` means the pid is alive, so pruning it would drop
+    the only handle the control plane has on a live run.
+    """
+    cutoff = datetime.now(timezone.utc).timestamp() - older_than_days * 86400
+    removed: list[str] = []
+    kept: list[str] = []
+    live: list[str] = []
+    for session in session_registry.list_sessions(session_dir=session_dir):
+        run_id = str(session.get("run_id"))
+        if session.get("state") in (
+            session_registry.RUNNING,
+            session_registry.INTERRUPTING,
+        ):
+            live.append(run_id)
+            continue
+        stamp = session.get("finished_at") or session.get("started_at")
+        if not _older_than(stamp, cutoff):
+            kept.append(run_id)
+            continue
+        if not dry_run:
+            session_registry.forget(run_id, session_dir=session_dir)
+        removed.append(run_id)
+    return {
+        "dry_run": dry_run,
+        "removed": removed,
+        "kept": kept,
+        "live": live,
+    }
+
+
+def _older_than(stamp: object, cutoff: float) -> bool:
+    """Whether an ISO-8601 stamp predates the cutoff. An unreadable one is kept."""
+    if not isinstance(stamp, str) or not stamp:
+        return False
+    try:
+        parsed = datetime.fromisoformat(stamp)
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp() < cutoff
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="control the harness's child sessions")
     parser.add_argument("--session-dir", default=None, help="override the registry dir")
@@ -210,6 +264,9 @@ def main(argv: list[str] | None = None) -> int:
     send.add_argument("text")
     stop = sub.add_parser("interrupt", help="kill a session's process tree")
     stop.add_argument("run_id")
+    trim = sub.add_parser("prune", help="delete settled records older than a cutoff")
+    trim.add_argument("--older-than-days", type=float, required=True)
+    trim.add_argument("--dry-run", action="store_true", help="report without deleting")
 
     args = parser.parse_args(argv)
     if args.command == "list":
@@ -229,6 +286,14 @@ def main(argv: list[str] | None = None) -> int:
         return (
             0 if result.get("killed") or result.get("reason") == "already exited" else 1
         )
+    if args.command == "prune":
+        result = prune(
+            older_than_days=args.older_than_days,
+            session_dir=args.session_dir,
+            dry_run=args.dry_run,
+        )
+        print(json.dumps(result, indent=2))
+        return 0
     parser.print_help()
     return 1
 

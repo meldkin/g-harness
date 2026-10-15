@@ -311,3 +311,104 @@ def test_posix_descendant_walk_is_a_no_op_where_ps_is_absent(mods):
     """`ps --ppid` is the POSIX half; on Windows the lookup must not raise."""
     _, control = mods
     assert control._descendant_pids_windows_free(os.getpid()) == []
+
+
+# ── prune / forget ───────────────────────────────────────────────────────────
+
+
+def _write_record(directory, run_id, *, state, stamp, pid=4242):
+    (directory / f"{run_id}.json").write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "worker": "fake",
+                "pid": pid,
+                "state": state,
+                "started_at": stamp,
+                "finished_at": stamp,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_prune_deletes_old_settled_records_only(mods, tmp_path):
+    registry, control = mods
+    old = "2020-01-01T00:00:00+00:00"
+    _write_record(tmp_path, "oldrun", state="exited", stamp=old)
+    live_run = registry.record_start("fake", pid=os.getpid(), session_dir=tmp_path)
+
+    result = control.prune(older_than_days=1, session_dir=tmp_path)
+
+    assert result["removed"] == ["oldrun"]
+    assert result["live"] == [live_run]
+    assert [s["run_id"] for s in registry.list_sessions(session_dir=tmp_path)] == [
+        live_run
+    ]
+
+
+def test_prune_keeps_a_recent_record(mods, tmp_path):
+    registry, control = mods
+    run_id = registry.record_start("fake", session_dir=tmp_path)
+    registry.record_finish(run_id, 0, session_dir=tmp_path)
+
+    result = control.prune(older_than_days=30, session_dir=tmp_path)
+
+    assert result["removed"] == []
+    assert result["kept"] == [run_id]
+    assert len(registry.list_sessions(session_dir=tmp_path)) == 1
+
+
+def test_prune_dry_run_deletes_nothing(mods, tmp_path):
+    registry, control = mods
+    _write_record(tmp_path, "oldrun", state="exited", stamp="2020-01-01T00:00:00+00:00")
+    result = control.prune(older_than_days=1, session_dir=tmp_path, dry_run=True)
+    assert result["removed"] == ["oldrun"]
+    assert len(registry.list_sessions(session_dir=tmp_path)) == 1  # still on disk
+
+
+def test_prune_treats_an_unreadable_stamp_as_keep(mods, tmp_path):
+    registry, control = mods
+    _write_record(tmp_path, "mystery", state="exited", stamp="not-a-timestamp")
+    result = control.prune(older_than_days=1, session_dir=tmp_path)
+    assert result["removed"] == []
+    assert result["kept"] == ["mystery"]
+
+
+def test_prune_keeps_a_record_with_no_timestamp_at_all(mods, tmp_path):
+    registry, control = mods
+    (tmp_path / "bare.json").write_text(
+        json.dumps(
+            {"run_id": "bare", "worker": "fake", "pid": 4242, "state": "exited"}
+        ),
+        encoding="utf-8",
+    )
+    result = control.prune(older_than_days=1, session_dir=tmp_path)
+    assert result["removed"] == []
+    assert result["kept"] == ["bare"]
+
+
+def test_prune_reads_a_naive_timestamp_as_utc(mods, tmp_path):
+    """A hand-written record without an offset must not look ancient by accident."""
+    registry, control = mods
+    _write_record(tmp_path, "naive", state="exited", stamp="2020-01-01T00:00:00")
+    assert control.prune(older_than_days=1, session_dir=tmp_path)["removed"] == [
+        "naive"
+    ]
+    assert registry.list_sessions(session_dir=tmp_path) == []
+
+
+def test_forget_reports_a_missing_record(mods, tmp_path):
+    registry, _ = mods
+    assert registry.forget("nosuchrun", session_dir=tmp_path) is False
+
+
+def test_cli_prune_in_process(mods, tmp_path, capsys):
+    registry, control = mods
+    _write_record(tmp_path, "oldrun", state="exited", stamp="2020-01-01T00:00:00+00:00")
+    code = control.main(
+        ["--session-dir", str(tmp_path), "prune", "--older-than-days", "1"]
+    )
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["removed"] == ["oldrun"]
+    assert registry.list_sessions(session_dir=tmp_path) == []

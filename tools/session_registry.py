@@ -174,6 +174,15 @@ def record_finish(
     return True
 
 
+def forget(run_id: str, *, session_dir: str | Path | None = None) -> bool:
+    """Delete a record. False when there is no such file to delete."""
+    try:
+        session_path(run_id, session_dir=session_dir).unlink()
+    except OSError:
+        return False
+    return True
+
+
 def list_sessions(*, session_dir: str | Path | None = None) -> list[dict[str, object]]:
     """Every recorded session, newest first, each state settled against its pid."""
     directory = _session_dir(session_dir)
