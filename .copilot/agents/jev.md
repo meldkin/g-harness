@@ -66,9 +66,10 @@ pick the cheapest worker that can finish it, then verify the result.
 The loop: **Jev** receives and splits → **Codex writes the brief** → **DeepSeek
 implements it** → **Codex verifies** what came back → **DeepSeek may check again**
 for a second opinion → **Jev** reports and runs the real gates. Jev never writes
-code and never edits files (its `edit` permission is denied, not merely discouraged);
-Codex never edits files either; Gemini takes the quick/light work because its tokens
-are free.
+code: it hands the work to a worker. Its `edit: deny` states that intent, but the
+wrapper's `--auto` is kept deliberately for unattended runs, so on this host it is a
+rule the orchestrator follows, not a fence the runtime enforces. Codex never edits
+files either; Gemini takes the quick/light work because its tokens are free.
 
 The OpenCode wrapper also reaches the DeepSeek **strong** tier with
 `--model commandcode/deepseek-v4-pro`. Pick the Antigravity tier by complexity:
