@@ -55,6 +55,12 @@ Usage (argv-prefix runner — the seam the harness delegates can wrap):
 The workspace ACE outlives the run on purpose (the reuse cache), so ``revert`` is
 how a tree gets its DACL back once the sandbox is no longer wanted on it.
 
+A worker usually needs its own state directory too (``~/.codex``, a cache dir,
+…). Those sit outside the workspace and are denied, so grant each one with a
+repeatable ``--also-write <dir>``. Such a grant is revoked on exit, unlike the
+workspace ACE, because it is the caller's own directory rather than a target the
+caller named as a workspace.
+
 The delegate wrappers (``tools/*_delegate.py``) can be confined by prefixing
 their own argv with ``run ... --``; the restricted token is inherited by every
 descendant the worker spawns, so the whole worker subtree is write-confined.
@@ -199,6 +205,7 @@ class RunnerArgs:
     temp: str
     mode: Mode
     argv: list[str]
+    also_write: list[str] = field(default_factory=list)
 
     @property
     def seam_managed(self) -> bool:
@@ -208,17 +215,18 @@ class RunnerArgs:
 
 
 def parse_runner_argv(raw: list[str]) -> RunnerArgs:
-    """Parse ``--workspace/--temp/--mode -- <argv>``. Pure — tested directly."""
+    """Parse ``--workspace/--temp/--mode/--also-write -- <argv>``. Pure."""
     workspace: str | None = None
     temp: str | None = None
     mode: str | None = None
+    also_write: list[str] = []
     index = 0
     while index < len(raw):
         argument = raw[index]
         if argument == "--":
             index += 1
             break
-        if argument not in ("--workspace", "--temp", "--mode"):
+        if argument not in ("--workspace", "--temp", "--mode", "--also-write"):
             raise ValueError(f"unknown argument: {argument}")
         if index + 1 >= len(raw):
             raise ValueError(f"missing value after {argument}")
@@ -227,6 +235,8 @@ def parse_runner_argv(raw: list[str]) -> RunnerArgs:
             workspace = value
         elif argument == "--temp":
             temp = value
+        elif argument == "--also-write":
+            also_write.append(value)
         else:
             mode = value
         index += 2
@@ -239,7 +249,13 @@ def parse_runner_argv(raw: list[str]) -> RunnerArgs:
     argv = raw[index:]
     if not argv:
         raise ValueError("missing command after --")
-    return RunnerArgs(workspace=workspace, temp=temp, mode=mode, argv=list(argv))
+    return RunnerArgs(
+        workspace=workspace,
+        temp=temp,
+        mode=mode,
+        argv=list(argv),
+        also_write=also_write,
+    )
 
 
 # ─── Win32 layer (ctypes) ────────────────────────────────────────────────────
@@ -955,20 +971,22 @@ class SpawnResult:
 class WinSandbox:
     """One write-restricted sandbox: token + capability-SID grants + spawn.
 
-    ``init()`` is fail-closed — any Win32 failure revokes the revocable (temp)
-    grant and raises, so a child is never spawned unrestricted. ``dispose()``
-    revokes the temp grant, frees the SIDs, and closes the token; the standing
-    workspace ACE stays as the cross-run reuse cache.
+    ``init()`` is fail-closed — any Win32 failure revokes the revocable grants and
+    raises, so a child is never spawned unrestricted. ``dispose()`` revokes the
+    temp and ``also_write`` grants, frees the SIDs, and closes the token; the
+    standing workspace ACE stays as the cross-run reuse cache.
     """
 
     mode: Mode
     workspace_root: str
     temp_dir: str | None = None
+    also_write: list[str] = field(default_factory=list)
     _k32: ctypes.WinDLL | None = field(default=None, repr=False)
     _adv: ctypes.WinDLL | None = field(default=None, repr=False)
     _token: int | None = field(default=None, repr=False)
     _workspace_sid: int | None = field(default=None, repr=False)
     _temp_sid: int | None = field(default=None, repr=False)
+    _extra_grants: list[tuple[str, int]] = field(default_factory=list, repr=False)
     _allocations: list[int] = field(default_factory=list, repr=False)
     _temp_granted: bool = field(default=False, repr=False)
 
@@ -988,6 +1006,19 @@ class WinSandbox:
             self.temp_dir = temp
         elif self.temp_dir:
             raise ValueError("read-only does not accept a temp directory")
+        if self.also_write and self.mode != "workspace-write":
+            raise ValueError(
+                "--also-write needs workspace-write: read-only denies writes"
+            )
+        roots: list[str] = []
+        for extra in self.also_write:
+            path = canonical_path(extra)
+            if not os.path.isdir(path):
+                raise ValueError(f"--also-write is not a directory: {path}")
+            roots.append(path)
+        self.also_write = roots
+        if roots and self.temp_dir:
+            assert_private_temp_disjoint(roots, self.temp_dir)
 
     def init(self) -> None:
         """Create the restricted token and apply the capability-SID grants."""
@@ -1008,11 +1039,27 @@ class WinSandbox:
                 grant_write(self.workspace_root, self._workspace_sid)
                 grant_write(self.temp_dir, self._temp_sid)
                 self._temp_granted = True
+                # Extra roots are granted and then revoked on dispose, unlike the
+                # workspace cache: they are usually the caller's own state dirs,
+                # and a confinement layer should not leave a DACL edit behind on a
+                # tree the caller never named as a workspace.
+                for extra in self.also_write:
+                    extra_sid = _parse_sid(adv, workspace_write_sid(extra))
+                    self._extra_grants.append((extra, extra_sid))
+                    grant_write(extra, extra_sid)
             logon_sid = _find_logon_sid(k32, adv, current_token)
             self._allocations.append(logon_sid)
             world_sid = _make_well_known_sid(k32, adv, WIN_WORLD_SID)
             self._allocations.append(world_sid)
-            write_sids = [s for s in (self._workspace_sid, self._temp_sid) if s]
+            write_sids = [
+                sid
+                for sid in (
+                    self._workspace_sid,
+                    self._temp_sid,
+                    *[extra_sid for _, extra_sid in self._extra_grants],
+                )
+                if sid
+            ]
             restricted = _create_restricted_token(
                 k32, adv, current_token, logon_sid, world_sid, write_sids, self.mode
             )
@@ -1036,6 +1083,12 @@ class WinSandbox:
             with suppress(OSError):
                 revoke_write(self.temp_dir, self._temp_sid)
             self._temp_granted = False
+        for path, sid in self._extra_grants:
+            with suppress(OSError):
+                revoke_write(path, sid)
+            if k32 is not None:
+                k32.LocalFree(ctypes.c_void_p(sid))
+        self._extra_grants = []
         if k32 is not None:
             for sid in (self._workspace_sid, self._temp_sid):
                 if sid:
@@ -1209,6 +1262,7 @@ def run_confined(raw_argv: list[str]) -> int:
         mode=parsed.mode,
         workspace_root=parsed.workspace,
         temp_dir=parsed.temp if parsed.mode == "workspace-write" else None,
+        also_write=list(parsed.also_write),
     )
     initialized = False
     try:
@@ -1238,20 +1292,26 @@ def run_confined(raw_argv: list[str]) -> int:
             sandbox.dispose()
 
 
-def _revert(workspace: str | None, temp: str | None) -> int:
-    """Drop the standing capability ACEs a previous run left on these trees.
+def _revert(
+    workspace: str | None, temp: str | None, also_write: list[str] | None = None
+) -> int:
+    """Drop the capability ACEs a previous run left on these trees.
 
     Prints JSON and exits 0; any failure prints to stderr and exits 1. The temp
-    ACE is normally revoked by ``dispose()``, so a leftover temp grant means a
-    run died without cleanup — this cleans that up too.
+    and ``also_write`` ACEs are normally revoked by ``dispose()``, so a leftover
+    grant means a run died without cleanup — this cleans that up too.
     """
     scopes: list[tuple[str, str, str]] = []
     if workspace:
         scopes.append(("workspace", workspace, workspace_write_sid(workspace)))
     if temp:
         scopes.append(("temp", temp, temp_write_sid(temp)))
+    for extra in also_write or []:
+        scopes.append((extra, extra, workspace_write_sid(extra)))
     if not scopes:
-        sys.stderr.write(f"{_REVERT_SIGNATURE}: pass --workspace and/or --temp\n")
+        sys.stderr.write(
+            f"{_REVERT_SIGNATURE}: pass --workspace, --temp and/or --also-write\n"
+        )
         return 1
 
     report: dict[str, dict[str, object]] = {}
@@ -1311,12 +1371,24 @@ def main(argv: list[str] | None = None) -> int:
         "--mode", choices=["read-only", "workspace-write"], default="workspace-write"
     )
     run.add_argument("argv", nargs=argparse.REMAINDER)
+    run.add_argument(
+        "--also-write",
+        action="append",
+        default=[],
+        help="extra writable root (repeatable); its ACE is revoked on exit",
+    )
     sub.add_parser("probe", help="report availability without touching the host")
     revert = sub.add_parser("revert", help="drop a capability ACE left on a tree")
     revert.add_argument(
         "--workspace", help="workspace root to take the standing ACE off"
     )
     revert.add_argument("--temp", help="private temp directory to take the ACE off")
+    revert.add_argument(
+        "--also-write",
+        action="append",
+        default=[],
+        help="extra writable root to take the ACE off (repeatable)",
+    )
 
     args = parser.parse_args(argv)
     if args.self_test:
@@ -1325,7 +1397,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(probe(), indent=2))
         return 0
     if args.command == "revert":
-        return _revert(args.workspace, args.temp)
+        return _revert(args.workspace, args.temp, args.also_write)
     if args.command == "run":
         tail = list(args.argv)
         if tail and tail[0] == "--":
@@ -1337,9 +1409,10 @@ def main(argv: list[str] | None = None) -> int:
             args.temp,
             "--mode",
             args.mode,
-            "--",
-            *tail,
         ]
+        for extra in args.also_write:
+            raw += ["--also-write", extra]
+        raw += ["--", *tail]
         try:
             return run_confined(raw)
         except RunnerFailure:

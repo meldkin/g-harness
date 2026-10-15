@@ -75,8 +75,8 @@ def _run_cli(*argv: str) -> subprocess.CompletedProcess:
     )
 
 
-def _has_workspace_ace(path: Path) -> bool:
-    """Read the directory's DACL and ask whether the capability ACE sits on it."""
+def _has_capability_ace(path: Path) -> bool:
+    """Read the directory's DACL and ask whether its capability ACE sits on it."""
     mod = _load()
     k32, adv = mod._api()
     sid = mod._parse_sid(adv, mod.workspace_write_sid(str(path)))
@@ -193,6 +193,28 @@ def test_parse_runner_argv_accepts_the_contract():
     assert parsed.mode == "read-only"
     assert parsed.argv == ["cmd", "/c", "x"]
     assert parsed.seam_managed is False
+    assert parsed.also_write == []
+
+
+def test_parse_runner_argv_collects_every_also_write():
+    mod = _load()
+    parsed = mod.parse_runner_argv(
+        [
+            "--workspace",
+            "w",
+            "--temp",
+            "t",
+            "--mode",
+            "workspace-write",
+            "--also-write",
+            "a",
+            "--also-write",
+            "b",
+            "--",
+            "cmd",
+        ]
+    )
+    assert parsed.also_write == ["a", "b"]
 
 
 def test_parse_runner_argv_rejects_bad_input():
@@ -248,6 +270,31 @@ def test_win_sandbox_rejects_temp_inside_workspace(tmp_path):
         )
 
 
+def test_also_write_needs_workspace_write(tmp_path):
+    mod = _load()
+    ws, extra = tmp_path / "ws", tmp_path / "extra"
+    ws.mkdir()
+    extra.mkdir()
+    with pytest.raises(ValueError):
+        mod.WinSandbox(
+            mode="read-only", workspace_root=str(ws), also_write=[str(extra)]
+        )
+
+
+def test_also_write_must_be_a_directory(tmp_path):
+    mod = _load()
+    ws, tmp = tmp_path / "ws", tmp_path / "tmp"
+    ws.mkdir()
+    tmp.mkdir()
+    with pytest.raises(ValueError):
+        mod.WinSandbox(
+            mode="workspace-write",
+            workspace_root=str(ws),
+            temp_dir=str(tmp),
+            also_write=[str(tmp_path / "absent")],
+        )
+
+
 def test_spawn_before_init_and_dispose_without_init(tmp_path):
     mod = _load()
     ws = tmp_path / "ws"
@@ -270,7 +317,7 @@ def test_main_self_test_exits_zero(capsys):
 def test_revert_without_a_scope_is_a_usage_error(capsys):
     mod = _load()
     assert mod.main(["revert"]) == 1
-    assert "pass --workspace and/or --temp" in capsys.readouterr().err
+    assert "pass --workspace, --temp and/or --also-write" in capsys.readouterr().err
 
 
 # ── Windows: availability, SID machinery, ACLs, confinement ──────────────────
@@ -508,12 +555,12 @@ def test_revert_drops_the_ace_a_run_leaves_standing():
             "echo x> inside.txt",
         )
         assert run.returncode == 0
-        assert _has_workspace_ace(ws) is True
+        assert _has_capability_ace(ws) is True
 
         first = _run_cli("revert", "--workspace", str(ws))
         assert first.returncode == 0
         assert json.loads(first.stdout)["workspace"]["removed"] is True
-        assert _has_workspace_ace(ws) is False
+        assert _has_capability_ace(ws) is False
 
         # Nothing left to remove is a success, not an error: revert is idempotent.
         second = _run_cli("revert", "--workspace", str(ws))
@@ -548,6 +595,53 @@ def test_revert_reports_a_missing_directory(tmp_path):
     assert proc.stderr.startswith("win_sandbox revert:")
 
 
+@WIN_ONLY
+def test_also_write_opens_one_extra_root_then_revokes_it():
+    """A worker's state dir needs a grant; unlike the workspace, it is temporary."""
+    with _normal_acl_dir() as root:
+        ws, tmp, state = root / "ws", root / "tmp", root / "state"
+        for path in (ws, tmp, state):
+            path.mkdir()
+        target = state / "ok.txt"
+
+        denied = _run_cli(
+            "run",
+            "--workspace",
+            str(ws),
+            "--temp",
+            str(tmp),
+            "--mode",
+            "workspace-write",
+            "--",
+            "cmd",
+            "/c",
+            f"echo x> {target}",
+        )
+        assert denied.returncode != 0
+        assert not target.exists()
+
+        allowed = _run_cli(
+            "run",
+            "--workspace",
+            str(ws),
+            "--temp",
+            str(tmp),
+            "--also-write",
+            str(state),
+            "--mode",
+            "workspace-write",
+            "--",
+            "cmd",
+            "/c",
+            f"echo x> {target}",
+        )
+        assert allowed.returncode == 0
+        assert target.exists()
+
+        # Disposed with the run, so the caller's own directory gets its DACL back.
+        assert _has_capability_ace(state) is False
+
+
 # The CLI tests above drive the real seam, but they run in a child process, so
 # coverage cannot see the functions they exercise. These call the same ones
 # in-process — same assertions, visible to the ratchet.
@@ -568,7 +662,7 @@ def test_revoke_grant_reports_presence_then_absence(tmp_path):
 
     assert mod.revoke_grant(str(ws), sid_string) is True
     assert mod.revoke_grant(str(ws), sid_string) is False
-    assert _has_workspace_ace(ws) is False
+    assert _has_capability_ace(ws) is False
 
 
 @WIN_ONLY
@@ -582,3 +676,42 @@ def test_revert_in_process_reports_an_absent_grant(tmp_path, capsys):
     # A missing directory is a refused scope, not a traceback.
     assert mod._revert(str(tmp_path / "absent"), None) == 1
     assert capsys.readouterr().err.startswith("win_sandbox revert:")
+
+
+@WIN_ONLY
+def test_sandbox_grants_and_revokes_an_extra_root_in_process(tmp_path):
+    """The extra-root grant lifecycle, called directly so coverage can see it."""
+    mod = _load()
+    ws, tmp, state = tmp_path / "ws", tmp_path / "tmp", tmp_path / "state"
+    for path in (ws, tmp, state):
+        path.mkdir()
+    sandbox = mod.WinSandbox(
+        mode="workspace-write",
+        workspace_root=str(ws),
+        temp_dir=str(tmp),
+        also_write=[str(state)],
+    )
+    sandbox.init()
+    try:
+        assert _has_capability_ace(state) is True
+    finally:
+        sandbox.dispose()
+    assert _has_capability_ace(state) is False
+
+
+@WIN_ONLY
+def test_revert_in_process_reports_an_extra_root(tmp_path, capsys):
+    mod = _load()
+    state = tmp_path / "state"
+    state.mkdir()
+    sid_string = mod.workspace_write_sid(str(state))
+    k32, adv = mod._api()
+    sid = mod._parse_sid(adv, sid_string)
+    try:
+        mod.grant_write(str(state), sid)
+    finally:
+        k32.LocalFree(ctypes.c_void_p(sid))
+
+    assert mod._revert(None, None, [str(state)]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report[str(state)]["removed"] is True
