@@ -77,7 +77,10 @@ ROOT_FILES = [
 # target project (they document/govern THIS repo's own contribution process
 # and internal spec, not the target project).
 DEV_ONLY_ROOT_FILES = {
-    "SPEC.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "SECURITY.md",
+    "SPEC.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "SECURITY.md",
     "LICENSE",  # Solo-Code-CLI's own license, not the target project's
     "opencode.ps1",  # deprecated launcher, see .harness.lock
 }
@@ -87,8 +90,8 @@ DEV_ONLY_ROOT_FILES = {
 # beyond the current ROOT_FILES, because a previous deploy is what put them
 # there. Append here whenever a file is dropped from ROOT_FILES.
 RETIRED_ROOT_FILES = {
-    "opencode.ps1",    # removed v4.0.0 (launcher superseded by opencode.json)
-    "jcode.ps1",       # removed v4.1.0 (jcode engine retired)
+    "opencode.ps1",  # removed v4.0.0 (launcher superseded by opencode.json)
+    "jcode.ps1",  # removed v4.1.0 (jcode engine retired)
 }
 
 # The complete set of root-level filenames the harness is permitted to
@@ -138,7 +141,7 @@ LOCAL_ONLY_HARNESS_DIRS = {".agents"}
 # beyond the current manifest. Append here whenever such a file is dropped.
 RETIRED_SHARED_FILES = {
     "tools/migrate_to_shared_state.py",  # removed with shared-state migration
-    "tools/test_harness.py",             # split into tools/test_*.py
+    "tools/test_harness.py",  # split into tools/test_*.py
 }
 
 # Directories to copy (relative to ROOT)
@@ -201,27 +204,42 @@ DIRS_CODEX = [
 
 # Patterns to exclude from copy
 EXCLUDE_DIRS = {
-    ".pytest_cache", ".ruff_cache", "node_modules", ".git",
-    "__pycache__", ".venv", "venv",
-    ".solocode", "cocoindex-code-main", "docs",
+    ".pytest_cache",
+    ".ruff_cache",
+    "node_modules",
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".solocode",
+    "cocoindex-code-main",
+    "docs",
     # Runtime state directories — never belong in a deploy
-    "sessions",           # .kilo/state/sessions/
-    "logs",               # .kilo/logs/
+    "sessions",  # .kilo/state/sessions/
+    "logs",  # .kilo/logs/
     # Solo-Code-CLI's own CI/release pipeline — target project designs its own
-    "workflows",           # .github/workflows/ci.yml, release.yml
+    "workflows",  # .github/workflows/ci.yml, release.yml
 }
 EXCLUDE_FILES = {
-    ".env", "usage.log", "usage.jsonl",
-    ".DS_Store", "Thumbs.db",
+    ".env",
+    "usage.log",
+    "usage.jsonl",
+    ".DS_Store",
+    "Thumbs.db",
     "settings.local.json",  # .claude/ personal overrides — never deploy
     # Runtime state files — never belong in a deploy
-    "token-log.jsonl",    # .kilo/state/token-log.jsonl
-    "tool-count.json",    # .kilo/state/tool-count.json
+    "token-log.jsonl",  # .kilo/state/token-log.jsonl
+    "tool-count.json",  # .kilo/state/tool-count.json
     "edited-files.json",  # .kilo/state/edited-files.json
     # Solo-Code-CLI dev tooling under tools/ — builds/tests/deploys THIS repo,
     # not needed to just RUN the harness in a target project.
-    "deploy.py", "garden.py", "generate_harness.py", "claude_engine.py",
-    "opencode_engine.py", "validate_schemas.py", "migrate_to_shared_state.py",
+    "deploy.py",
+    "garden.py",
+    "generate_harness.py",
+    "claude_engine.py",
+    "opencode_engine.py",
+    "validate_schemas.py",
+    "migrate_to_shared_state.py",
     "harness_config.py",
     # NOTE: individual tools/test_*.py files are NOT listed here — they are
     # excluded by rule in should_copy(). Listing them by hand meant every new
@@ -230,7 +248,9 @@ EXCLUDE_FILES = {
     # Solo-Code-CLI's OWN accumulated memory — describes THIS repo's design/
     # conventions, not the target project's. Deploy writes fresh blank
     # templates instead (see _write_blank_memory_templates()).
-    "MEMORY.md", "project-conventions.md", "harness-design-intent.md",
+    "MEMORY.md",
+    "project-conventions.md",
+    "harness-design-intent.md",
     "decisions-archive.md",
     # Shared skill skip-list (consumed by both claude_engine and
     # opencode_engine generation via generate_harness.py) -- dev-only.
@@ -306,38 +326,80 @@ else in them is your project's code.
 MIT
 """
 
+# Engine facts, not project facts: a target's lock states them too, so they live
+# outside the template body and are interpolated into both modes.
+HARNESS_ENGINE_STATUS = """\
+# --- ENGINE STATUS (v{version}) ---
+# .opencode/  -> first-class primary agent engine, now targeting OpenCode v2
+#                (@opencode/cli + @opencode/plugin; the v1 line opencode-ai /
+#                @opencode-ai/plugin is retired). tools/opencode_engine.py
+#                regenerates agents, commands, on-demand skills under
+#                `.opencode/skills/` for `.kilo/instruction/*.md`, and a config
+#                split across root `opencode.json` (v1-safe: model + legacy
+#                `permission`) and `.opencode/opencode.json` (v2-only
+#                `providers`) so the host IDE's bundled OpenCode v1 stays clean.
+# .copilot/   -> NOT auto-generated. Manually kept in parity with .kilo/
+#                (source of truth); verified by tools/garden.py drift checks.
+# codex       -> direct CLI integration via codex-env.ps1 and tools/codex_*.py.
+#                Codex has no project lifecycle hooks, so lifecycle and gates
+#                run through the launcher/explicit verification entrypoints.
+# jcode       -> RETIRED in v4.1.0. Launcher jcode.ps1 removed; no dedicated
+#                harness dir. Older deploys are cleaned via the
+#                RETIRED_ROOT_FILES entry in tools/deploy.py.
+"""
+
+# How [shared_files] is populated. The two modes differ on purpose: a target
+# receives a subset, this repo IS the harness and declares everything it tracks.
+ROOT_SHARED_NOTE = """\
+# Đường dẫn chính xác của file harness nằm trong shared_dirs. Repo này CHÍNH LÀ
+# harness, nên mọi file được git theo dõi trong ba thư mục trên đều là harness.
+# Một bản deploy sang dự án đích chỉ khai báo tập con thực sự được ship.
+#
+# GIỮ BẰNG TAY — KHÔNG regenerate bằng đường deploy: `_shared_harness_paths()`
+# chỉ ship những gì một dự án đích nhận được, nên nó BỎ MẤT các entry mà lock gốc
+# cố ý giữ (tools/deploy.py, garden.py, test_e2e.py, các test suite,
+# .github/workflows/*). Regenerate lock gốc bằng `--root-lock`, không bằng deploy.
+"""
+TARGET_SHARED_NOTE = """\
+# Đường dẫn chính xác của file harness nằm trong shared_dirs. Danh sách này
+# được sinh ra từ nội dung deploy thực tế, không phải viết tay.
+"""
+
 HARNESS_LOCK_TEMPLATE = """# Solo-Code Harness Manifest
 # ===========================
 # File này đánh dấu ranh giới giữa harness infrastructure và code dự án.
 # AI Model: đọc file này trước khi phân tích codebase.
 #
-# MỌI FILE/THƯ MỤC trong [boundaries] là HARNESS — KHÔNG phải code dự án.
+# MỌI FILE/THƯ MỤC trong [boundaries] dirs là HARNESS — KHÔNG phải code dự án.
 # Không sửa, không phân tích như logic nghiệp vụ.
+# .github/, .vscode/, tools/ là thư mục DÙNG CHUNG — chỉ những đường dẫn trong
+# [shared_files] mới là harness; file khác ở đó là CODE DỰ ÁN.
 
 [harness]
 version = "{version}"
 source = "solo-code-io/solo-code-cli"
 generated_at = "{timestamp}"
 
+{engine_status}
 [boundaries]
-# Thư mục harness — TOÀN BỘ nội dung là harness, KHÔNG chứa code dự án
+# Thư mục harness — toàn bộ nội dung là harness, KHÔNG chứa code dự án
 dirs = [
     ".codex",
     ".kilo",
     ".copilot",
     ".gemini",
-    ".claude",
+{local_only_dirs}    ".claude",
     ".claude-plugin",
     ".opencode",
     ".contracts",
 ]
 
-# Thư mục DÙNG CHUNG — harness đặt file vào đây, nhưng dự án CŨNG sở hữu
-# file riêng ở đây (CI workflow, CODEOWNERS, script dev, cấu hình editor...).
+# Thư mục DÙNG CHUNG — harness đặt file vào đây, nhưng dự án CŨNG sở hữu file
+# riêng ở đây (CI workflow, CODEOWNERS, script dev, cấu hình editor...).
 #
 # AI Model: KHÔNG được coi cả thư mục này là harness. Chỉ những đường dẫn
-# liệt kê trong [shared_files] mới là harness; MỌI file khác trong các thư
-# mục này là CODE DỰ ÁN — đọc, phân tích và sửa như bình thường.
+# liệt kê trong [shared_files] mới là harness; MỌI file khác trong các thư mục
+# này là CODE DỰ ÁN — đọc, phân tích và sửa như bình thường.
 shared_dirs = [
     ".github",
     ".vscode",
@@ -345,9 +407,7 @@ shared_dirs = [
 ]
 
 [shared_files]
-# Đường dẫn chính xác của file harness nằm trong shared_dirs. Danh sách này
-# được sinh ra từ nội dung deploy thực tế, không phải viết tay.
-paths = [
+{shared_note}paths = [
 {shared_files}
 ]
 
@@ -436,10 +496,21 @@ def _transform_agent_frontmatter(source_text: str, filename: str) -> str:
         # Detect when we leave the permission block (new top-level key at column 0)
         if not stripped.startswith(" ") and ":" in stripped:
             key = stripped.split(":", 1)[0].strip()
-            if key not in (
-                "edit", "bash", "read", "grep", "codesearch", "glob",
-                "task", "*",
-            ) and not stripped.startswith('"') and not stripped.startswith("'"):
+            if (
+                key
+                not in (
+                    "edit",
+                    "bash",
+                    "read",
+                    "grep",
+                    "codesearch",
+                    "glob",
+                    "task",
+                    "*",
+                )
+                and not stripped.startswith('"')
+                and not stripped.startswith("'")
+            ):
                 in_permission = False
                 continue
         # Handle task sub-block
@@ -448,7 +519,11 @@ def _transform_agent_frontmatter(source_text: str, filename: str) -> str:
             current_tool = ""
             continue
         if in_task:
-            if ":" in stripped and not stripped.startswith('"') and not stripped.startswith("'"):
+            if (
+                ":" in stripped
+                and not stripped.startswith('"')
+                and not stripped.startswith("'")
+            ):
                 parts = stripped.split(":", 1)
                 task_key = parts[0].strip()
                 task_val = parts[1].strip() if len(parts) > 1 else ""
@@ -496,7 +571,10 @@ def _transform_agent_frontmatter(source_text: str, filename: str) -> str:
         if perm_key in nested_perms:
             # Include if any rule allows (or asks) — Copilot doesn't distinguish
             perms = nested_perms[perm_key]
-            if any(v in ("allow", "ask") for v in perms.values()) and perm_key in tool_map:
+            if (
+                any(v in ("allow", "ask") for v in perms.values())
+                and perm_key in tool_map
+            ):
                 allowed_tools.append(tool_map[perm_key])
         elif perm_key in permissions and permissions[perm_key] in ("allow", "ask"):
             if perm_key in tool_map:
@@ -544,7 +622,9 @@ def _copy_copilot_agents_to_github(
 
         if dry_run:
             exists = "[UPD]" if dst_file.exists() else "[NEW]"
-            print(f"  [DRY] {exists} .github/agents/{dst_name} (from .copilot/agents/{src_file.name})")
+            print(
+                f"  [DRY] {exists} .github/agents/{dst_name} (from .copilot/agents/{src_file.name})"
+            )
             new_count += 1
             continue
 
@@ -649,8 +729,14 @@ def _write_blank_memory_templates(target: Path, dirs: list[str], dry_run: bool) 
         mem_dir = target / mem_rel
         for fname, content in (
             ("MEMORY.md", BLANK_MEMORY_MD),
-            ("project-conventions.md", BLANK_PROJECT_CONVENTIONS_MD.format(timestamp=timestamp)),
-            ("decisions-archive.md", BLANK_DECISIONS_ARCHIVE_MD.format(timestamp=timestamp)),
+            (
+                "project-conventions.md",
+                BLANK_PROJECT_CONVENTIONS_MD.format(timestamp=timestamp),
+            ),
+            (
+                "decisions-archive.md",
+                BLANK_DECISIONS_ARCHIVE_MD.format(timestamp=timestamp),
+            ),
         ):
             dst = mem_dir / fname
             if dst.exists():
@@ -690,10 +776,40 @@ def _shared_harness_paths(dirs: list[str]) -> list[str]:
     return sorted(paths)
 
 
+def _root_shared_paths(root: Path | None = None) -> list[str]:
+    """Every tracked file under SHARED_DIRS — the ROOT lock's ``[shared_files]``.
+
+    ``_shared_harness_paths`` answers "what does a target project receive", which
+    excludes the test suites and the harness's own dev tooling. This repo IS the
+    harness, so its root lock declares everything git tracks in those directories.
+    Regenerating the root lock through the deploy path therefore dropped 39
+    boundaries (measured); this is the function that keeps them.
+    """
+    base = root or ROOT
+    proc = subprocess.run(  # noqa: S603 — fixed argv
+        ["git", "-C", str(base), "ls-files", *sorted(SHARED_DIRS)],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"git ls-files failed for {base}: {proc.stderr.strip()}")
+    return sorted(set(proc.stdout.split()))
+
+
 def _generate_harness_lock(
-    target: Path, dry_run: bool = False, dirs: list[str] | None = None
+    target: Path,
+    dry_run: bool = False,
+    dirs: list[str] | None = None,
+    *,
+    root_mode: bool = False,
 ) -> None:
-    """Generate .harness.lock with current timestamp and version."""
+    """Generate .harness.lock with current timestamp and version.
+
+    ``root_mode`` writes THIS repo's lock: every tracked file under the shared
+    dirs, plus the note explaining why it is maintained by hand. Without it the
+    lock describes a deployed target, whose shared list is a subset.
+    """
     if dry_run:
         print("  [DRY] Would generate: .harness.lock")
         return
@@ -711,21 +827,41 @@ def _generate_harness_lock(
                 version = stripped.split("=", 1)[1].strip().strip('"')
                 break
 
-    shared = _shared_harness_paths(dirs if dirs is not None else DIRS_ALL)
+    shared = (
+        _root_shared_paths()
+        if root_mode
+        else _shared_harness_paths(dirs if dirs is not None else DIRS_ALL)
+    )
     shared_block = "\n".join(f'    "{p}",' for p in shared)
+    note = ROOT_SHARED_NOTE if root_mode else TARGET_SHARED_NOTE
+    # `.agents` is a junction the IDE creates locally, so a target never receives
+    # it and must not declare it — but this repo's lock must keep declaring it.
+    local_only = ""
+    if root_mode and LOCAL_ONLY_HARNESS_DIRS:
+        local_only = "".join(f'    "{d}",\n' for d in sorted(LOCAL_ONLY_HARNESS_DIRS))
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     content = HARNESS_LOCK_TEMPLATE.format(
-        version=version, timestamp=timestamp, shared_files=shared_block
+        version=version,
+        timestamp=timestamp,
+        engine_status=HARNESS_ENGINE_STATUS.format(version=version),
+        shared_note=note,
+        local_only_dirs=local_only,
+        shared_files=shared_block,
     )
     lock_path = target / ".harness.lock"
-    lock_path.write_text(content, encoding="utf-8")
-    print(f"  [NEW] .harness.lock — generated (v{version}, {len(shared)} shared paths)")
+    lock_path.write_text(content, encoding="utf-8", newline="\n")
+    label = "root" if root_mode else "target"
+    print(
+        f"  [NEW] .harness.lock — generated ({label}, v{version}, "
+        f"{len(shared)} shared paths)"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Core logic
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def should_copy(path: Path) -> bool:
     """Check if a file/dir should be copied (not excluded)."""
@@ -740,8 +876,10 @@ def should_copy(path: Path) -> bool:
     # note in EXCLUDE_FILES).
     if path.is_file() and name.startswith("test_") and name.endswith(".py"):
         return False
-    if path.is_file() and path.parent.name in ("inbox", "outbox") and (
-        name.endswith("-plan.md") or name.endswith("-report.md")
+    if (
+        path.is_file()
+        and path.parent.name in ("inbox", "outbox")
+        and (name.endswith("-plan.md") or name.endswith("-report.md"))
     ):
         # Solo-Code-CLI's own accumulated Claude<->Gemini task handoffs
         # (.gemini/antigravity/handoff/{inbox,outbox}/) -- per-task history
@@ -816,7 +954,9 @@ def _run_command(cmd: list[str], cwd: Path, label: str, dry_run: bool) -> bool:
 
     print(f"  [{label}] Running: {' '.join(cmd)}")
     try:
-        result = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, timeout=1800)
+        result = subprocess.run(
+            cmd, cwd=str(cwd), capture_output=True, text=True, timeout=1800
+        )
     except subprocess.TimeoutExpired:
         print(f"  [{label}] FAILED (timeout after 1800s)")
         return False
@@ -837,6 +977,7 @@ def _run_command(cmd: list[str], cwd: Path, label: str, dry_run: bool) -> bool:
 # Scaffold mode — create new project from scratch
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def _print_opencode_skills_note(dirs: list[str]) -> None:
     """Explain the partial `.claude/` dir that the OpenCode engine ships.
 
@@ -849,7 +990,9 @@ def _print_opencode_skills_note(dirs: list[str]) -> None:
         return
     print("\n  NOTE: .claude/skills/ ships with the OpenCode engine because OpenCode")
     print("  loads the Claude-compatible skills location. That makes .claude/ here a")
-    print("  PARTIAL copy (skills only, no agents/hooks) — not a full Claude Code setup.")
+    print(
+        "  PARTIAL copy (skills only, no agents/hooks) — not a full Claude Code setup."
+    )
 
 
 def scaffold(
@@ -881,9 +1024,9 @@ def scaffold(
     exists = target_path.exists()
     mode = "DRY RUN" if dry_run else "LIVE"
 
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  Solo-Code Harness Scaffold ({mode})")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  Project : {project_name}")
     print(f"  Target  : {target_path}")
     print(f"  Engine  : {engine}")
@@ -972,13 +1115,20 @@ def scaffold(
     executor_mode_src = ROOT / ".solocode" / "executor-mode"
 
     if executor_config_src.exists():
-        status = copy_file(executor_config_src, solocode_dir / "executor-config.json", dry_run, base=target_path)
+        status = copy_file(
+            executor_config_src,
+            solocode_dir / "executor-config.json",
+            dry_run,
+            base=target_path,
+        )
         print(status)
         if "[NEW]" in status:
             total_new += 1
 
     if executor_mode_src.exists():
-        status = copy_file(executor_mode_src, solocode_dir / "executor-mode", dry_run, base=target_path)
+        status = copy_file(
+            executor_mode_src, solocode_dir / "executor-mode", dry_run, base=target_path
+        )
         print(status)
         if "[NEW]" in status:
             total_new += 1
@@ -1032,7 +1182,9 @@ def scaffold(
             result = subprocess.run(
                 ["git", "status", "--porcelain"],
                 cwd=str(target_path),
-                capture_output=True, text=True, timeout=60,
+                capture_output=True,
+                text=True,
+                timeout=60,
             )
         except subprocess.TimeoutExpired:
             result = subprocess.CompletedProcess([], returncode=1, stdout="", stderr="")
@@ -1044,7 +1196,12 @@ def scaffold(
                 dry_run=False,
             )
             _run_command(
-                ["git", "commit", "-m", f"Initial scaffold: Solo-Code Harness ({engine} engine)\n\nCo-Authored-By: Solo-Code <admin@solo-code.com>"],
+                [
+                    "git",
+                    "commit",
+                    "-m",
+                    f"Initial scaffold: Solo-Code Harness ({engine} engine)\n\nCo-Authored-By: Solo-Code <admin@solo-code.com>",
+                ],
                 cwd=target_path,
                 label="GIT",
                 dry_run=False,
@@ -1056,7 +1213,9 @@ def scaffold(
     if dry_run:
         print(f"  DRY RUN — would scaffold project with {total_new} new files")
     else:
-        print(f"  Scaffolded: {total_new} new, {total_upd} updated, {total_skip} skipped")
+        print(
+            f"  Scaffolded: {total_new} new, {total_upd} updated, {total_skip} skipped"
+        )
     print("=" * 60)
 
     # ── Post-scaffold instructions ───────────────────────────────
@@ -1095,6 +1254,7 @@ def scaffold(
 # ═══════════════════════════════════════════════════════════════════════
 # Deploy mode — copy harness to existing project
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def _build_source_manifest(dirs: list[str]) -> set[str]:
     """Build a set of relative file paths (forward-slash) from source harness dirs."""
@@ -1176,10 +1336,14 @@ def _cleanup_stale_files(
                     continue
                 if rel not in source_manifest:
                     if dry_run:
-                        print(f"  [STALE] Would remove: {d}/{item.relative_to(dst).as_posix()}")
+                        print(
+                            f"  [STALE] Would remove: {d}/{item.relative_to(dst).as_posix()}"
+                        )
                     else:
                         item.unlink()
-                        print(f"  [STALE] Removed: {d}/{item.relative_to(dst).as_posix()}")
+                        print(
+                            f"  [STALE] Removed: {d}/{item.relative_to(dst).as_posix()}"
+                        )
                     removed += 1
 
     # Check root-level harness files for staleness.
@@ -1222,7 +1386,10 @@ def _uncommitted_changes(target: Path) -> list[str] | None:
     try:
         proc = subprocess.run(
             ["git", "-C", str(target), "status", "--porcelain"],
-            capture_output=True, text=True, timeout=30, check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -1340,7 +1507,9 @@ def deploy(
         for s in skipped[:5]:
             print(s)
         if len(skipped) > 5:
-            print(f"  ... and {len(skipped) - 5} more files (use --dry-run for full list)")
+            print(
+                f"  ... and {len(skipped) - 5} more files (use --dry-run for full list)"
+            )
 
         total_new += n
         total_upd += u
@@ -1394,9 +1563,13 @@ def deploy(
     print()
     print("=" * 60)
     if dry_run:
-        print(f"  DRY RUN — would deploy {total_new} files, update {total_upd}, remove {total_removed} stale")
+        print(
+            f"  DRY RUN — would deploy {total_new} files, update {total_upd}, remove {total_removed} stale"
+        )
     else:
-        print(f"  Deployed: {total_new} new, {total_upd} updated, {total_skip} skipped, {total_removed} stale removed")
+        print(
+            f"  Deployed: {total_new} new, {total_upd} updated, {total_skip} skipped, {total_removed} stale removed"
+        )
     print("=" * 60)
 
     if not dry_run:
@@ -1412,6 +1585,7 @@ def deploy(
 # ═══════════════════════════════════════════════════════════════════════
 # Interactive mode — ask user what to do
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def interactive() -> int:
     """Run in interactive mode — ask user for details."""
@@ -1436,7 +1610,9 @@ def interactive() -> int:
 
     # Ask engine
     while True:
-        engine = input("Engine (all/kilo/copilot/claude/opencode) [all]: ").strip().lower()
+        engine = (
+            input("Engine (all/kilo/copilot/claude/opencode) [all]: ").strip().lower()
+        )
         if not engine:
             engine = "all"
             break
@@ -1477,6 +1653,7 @@ def interactive() -> int:
 # ═══════════════════════════════════════════════════════════════════════
 # CLI
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def _looks_like_path(value: str) -> bool:
     """Heuristic: does the string look like a filesystem path?"""
@@ -1527,14 +1704,26 @@ def main() -> int:
         help="Project description (scaffold mode only)",
     )
     parser.add_argument(
-        "--yes", "-y",
+        "--yes",
+        "-y",
         action="store_true",
         help="Skip the confirmation prompt when deploying into a target with "
-             "uncommitted changes (deploy mode only)",
+        "uncommitted changes (deploy mode only)",
+    )
+    parser.add_argument(
+        "--root-lock",
+        action="store_true",
+        help="Regenerate THIS repo's .harness.lock (every tracked file in the "
+        "shared dirs) and exit. Do not use the deploy path for it: a target "
+        "receives a subset, so that path drops boundaries the root lock keeps.",
     )
 
     args = parser.parse_args()
     positional = args.args
+
+    if args.root_lock:
+        _generate_harness_lock(ROOT, dry_run=args.dry_run, root_mode=True)
+        return 0
 
     # ── Interactive mode (no args) ───────────────────────────────
     if not positional:

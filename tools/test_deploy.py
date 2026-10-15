@@ -25,8 +25,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+# Unconditional: under `pytest tools/` the root is already on sys.path, so a guard
+# left this file with one line the suite could never reach, and a duplicate entry
+# costs nothing.
+sys.path.insert(0, str(ROOT))
 
 from tools import deploy  # noqa: E402
 
@@ -91,8 +93,8 @@ def test_dry_run_does_not_touch_disk(tmp_path):
 def test_retired_harness_file_is_removed(tmp_path):
     """Cleanup must still do its job for files the harness once deployed."""
     proj = _make_project(tmp_path)
-    _write(proj / "opencode.json")   # now ACTIVE (reintroduced v4.2.0) — must survive
-    _write(proj / "opencode.ps1")   # retired launcher — must be removed
+    _write(proj / "opencode.json")  # now ACTIVE (reintroduced v4.2.0) — must survive
+    _write(proj / "opencode.ps1")  # retired launcher — must be removed
 
     removed = deploy._cleanup_stale_files(proj, deploy.DIRS_ALL, dry_run=False)
 
@@ -240,9 +242,11 @@ def test_retired_shared_files_live_in_shared_dirs(tmp_path):
 # model to "fix" the project's CI as if it were harness config, or makes it
 # treat harness files as project code to be refactored.
 
+
 def _parse_lock_paths(lock_text: str) -> set[str]:
     """Extract [shared_files].paths — NOT the shared_dirs list above it."""
     import re
+
     block = lock_text.split("paths = [")[1].split("]")[0]
     return set(re.findall(r'"([^"]+)"', block))
 
@@ -250,7 +254,9 @@ def _parse_lock_paths(lock_text: str) -> set[str]:
 def test_lock_shared_files_match_deployed_files(tmp_path):
     """Declared harness paths must equal what deploy actually ships there."""
     deploy._generate_harness_lock(tmp_path, dry_run=False, dirs=deploy.DIRS_ALL)
-    declared = _parse_lock_paths((tmp_path / ".harness.lock").read_text(encoding="utf-8"))
+    declared = _parse_lock_paths(
+        (tmp_path / ".harness.lock").read_text(encoding="utf-8")
+    )
     expected = set(deploy._shared_harness_paths(deploy.DIRS_ALL))
     assert declared == expected, (
         f"lock drifted from reality: missing={expected - declared}, "
@@ -299,8 +305,10 @@ def test_lock_never_claims_a_project_file(tmp_path):
 # eslint.config.js and .env.template were missing from `files` -- so every
 # deployed lock told the model those were project code it could edit.
 
+
 def _parse_template_list(template: str, key: str) -> list[str]:
     import re
+
     m = re.search(rf"^{key} = \[(.*?)\]$", template, re.MULTILINE | re.DOTALL)
     assert m, f"lock template has no top-level {key} = [...] block"
     return re.findall(r'"([^"]+)"', m.group(1))
@@ -381,14 +389,70 @@ def test_root_lock_dirs_cover_exclusive_dirs_plus_declared_local_only():
     )
 
 
+def test_root_lock_shared_files_cover_every_tracked_shared_file():
+    """The root lock's shared list must cover every tracked file in shared dirs.
+
+    Found the hard way on 2026-10-15: 26 tracked harness files (session_registry,
+    session_control, win_sandbox, gui_server, subagent_cli, codex_delegate and
+    their suites) were missing from the manifest, so anything reading it would
+    treat real harness files as project code.
+    """
+    lock = (deploy.ROOT / ".harness.lock").read_text(encoding="utf-8")
+    declared = _parse_lock_paths(lock)
+    tracked = set(deploy._root_shared_paths())
+
+    assert tracked - declared == set(), (
+        f"root .harness.lock misses tracked harness files: {sorted(tracked - declared)}"
+    )
+    assert declared - tracked == set(), (
+        f"root .harness.lock declares paths git does not track: "
+        f"{sorted(declared - tracked)}"
+    )
+
+
+def test_root_lock_is_reproducible_from_the_generator(tmp_path):
+    """Regenerating must reproduce the committed lock apart from `generated_at`.
+
+    Regenerating through the deploy path instead of `root_mode` drops 39 boundaries
+    (tools/deploy.py, garden.py, test_e2e.py, the test suites, .github/workflows/*),
+    so this asserts the root path specifically. A file added under a shared dir and
+    a lock left unrefreshed is the drift this fails on.
+    """
+    deploy._generate_harness_lock(tmp_path, root_mode=True)
+
+    def body(path: Path) -> list[str]:
+        return [
+            line
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if not line.startswith("generated_at")
+        ]
+
+    assert body(tmp_path / ".harness.lock") == body(deploy.ROOT / ".harness.lock")
+
+
+def test_root_lock_flag_regenerates_this_repos_lock(monkeypatch):
+    """`--root-lock` must go through root_mode, never the deploy path."""
+    calls: dict = {}
+    monkeypatch.setattr(
+        deploy,
+        "_generate_harness_lock",
+        lambda target, dry_run=False, **kwargs: calls.update(
+            target=target, dry_run=dry_run, **kwargs
+        ),
+    )
+    monkeypatch.setattr(sys, "argv", ["deploy.py", "--root-lock"])
+
+    assert deploy.main() == 0
+    assert calls == {"target": deploy.ROOT, "dry_run": False, "root_mode": True}
+
+
 def test_local_only_dirs_are_not_deployed():
     """A local-only harness dir must stay out of the cleanup-owns-everything
     set — otherwise a target's locally-created copy (e.g. the .agents/skills
     junction Antigravity makes) becomes eligible for full stale-cleanup."""
     overlap = deploy.LOCAL_ONLY_HARNESS_DIRS & deploy.EXCLUSIVE_HARNESS_DIRS
     assert not overlap, (
-        f"local-only dirs must not be exclusive (cleanup would wipe them): "
-        f"{overlap}"
+        f"local-only dirs must not be exclusive (cleanup would wipe them): {overlap}"
     )
     for d in deploy.LOCAL_ONLY_HARNESS_DIRS:
         assert d not in deploy.DIRS_ALL, (
@@ -455,8 +519,7 @@ def test_boundary_docs_flag_shared_dirs(tmp_path):
         if "shared" not in text and "dùng chung" not in text:
             offenders.append(rel)
     assert not offenders, (
-        f"boundary docs mention shared dirs without marking them shared: "
-        f"{offenders}"
+        f"boundary docs mention shared dirs without marking them shared: {offenders}"
     )
 
 
@@ -472,15 +535,21 @@ import subprocess  # noqa: E402
 def _git_repo(tmp_path: Path, *, dirty: bool) -> Path:
     repo = tmp_path / ("dirty" if dirty else "clean")
     repo.mkdir(parents=True, exist_ok=True)
-    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    env = {
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
     import os
+
     env = {**os.environ, **env}
     subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
     (repo / "package.json").write_text("{}\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, env=env)
-    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "init"],
-                   check=True, env=env)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-qm", "init"], check=True, env=env
+    )
     if dirty:
         (repo / "package.json").write_text("{modified}\n", encoding="utf-8")
     return repo

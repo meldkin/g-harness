@@ -11,7 +11,7 @@
 [harness]
 version = "4.3.1"
 source = "solo-code-io/solo-code-cli"
-generated_at = "2026-10-15T15:52:54Z"
+generated_at = "2026-10-15T16:07:27Z"
 
 # --- ENGINE STATUS (v4.3.1) ---
 # .opencode/  -> first-class primary agent engine, now targeting OpenCode v2
@@ -61,11 +61,12 @@ shared_dirs = [
 # Đường dẫn chính xác của file harness nằm trong shared_dirs. Repo này CHÍNH LÀ
 # harness, nên mọi file được git theo dõi trong ba thư mục trên đều là harness.
 # Một bản deploy sang dự án đích chỉ khai báo tập con thực sự được ship.
+#
+# GIỮ BẰNG TAY — KHÔNG regenerate bằng đường deploy: `_shared_harness_paths()`
+# chỉ ship những gì một dự án đích nhận được, nên nó BỎ MẤT các entry mà lock gốc
+# cố ý giữ (tools/deploy.py, garden.py, test_e2e.py, các test suite,
+# .github/workflows/*). Regenerate lock gốc bằng `--root-lock`, không bằng deploy.
 paths = [
-# GIỮ BẰNG TAY — KHÔNG regenerate: `_generate_harness_lock()` chỉ ship những gì một
-# dự án đích nhận được, nên regenerate sẽ BỎ MẤT 39 entry mà lock gốc cố ý giữ
-# (tools/deploy.py, garden.py, test_e2e.py, các test suite, .github/workflows/*).
-# Sửa template trong deploy.py trước, rồi mới regenerate.
     ".github/copilot-instructions.md",
     ".github/prompts/commit.prompt.md",
     ".github/prompts/debug.prompt.md",
@@ -176,7 +177,8 @@ paths = [
     "tools/test_validate_schemas.py",
     "tools/test_win_sandbox.py",
     "tools/validate_schemas.py",
-    "tools/win_sandbox.py",]
+    "tools/win_sandbox.py",
+]
 
 # File gốc harness — KHÔNG phải code dự án
 files = [
