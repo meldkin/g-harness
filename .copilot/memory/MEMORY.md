@@ -79,11 +79,12 @@ High-signal context loaded at session start. Detailed history belongs in
 - [decision] Subagent `ask` behaves as `allow` in headless runs (2026-10-07):
   use explicit `allow`/`deny`, never `ask`; probe detail in `decisions-archive.md`.
 - [decision] Guard hardening (2026-10-07): 33 -> 41 destructive patterns, 8 holes closed,
-  list in `decisions-archive.md`. (2026-10-16) re-measured: 5 of 7 already fixed; of the 4
-  left, 3 closed (+3 Windows-root patterns -> 44, README synced; separator-bearing quoted
-  spans blanked so `rg 'echo x; diskpart' .` reads as data). The 4th (secrets in a Kilo
-  command unscanned) stays open: fixing it needs `hooks.json` or a JS secret list.
-  Pytest timeout 120 -> 300s.
+  list in `decisions-archive.md`. (2026-10-16) re-measured: 5 of 7 already fixed; 3 of the 4
+  left closed (+3 Windows-root patterns -> 44, README synced; quoted spans holding a
+  separator read as data). The 4th (secrets in a Kilo command unscanned) stays open: fixing
+  it needs `hooks.json` or a JS secret list. Pipeline drill (`bcfa6bd`) closed the
+  post-separator wrapper gap; 3 wrapper-family gaps remain (archive). Pytest timeout
+  120 -> 300s.
 - [decision] Coverage (2026-10-07): the 13 files that started at 0.0% have tests and
   raised baselines; detail in `decisions-archive.md`.
 - [decision] GUI worker console (2026-10-07): full detail in `decisions-archive.md`

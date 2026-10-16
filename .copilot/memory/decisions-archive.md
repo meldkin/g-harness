@@ -805,3 +805,41 @@ nothing else may run pytest while the ratchet (or `checklist.py`, which calls it
 
 Full `pytest tools/` with the ratchet's own coverage flags: 1276 passed, 1 skipped, 15
 warnings in 144s. Earlier notes citing 1161-1262 predate this session's additions.
+
+## 2026-10-16 - Pipeline drill: one real task end to end
+
+First full run of the 4-role pipeline on real work instead of arm smoke tests. Task: the
+two guard defects measured that morning (a wrapped rm payload after a separator was
+allowed; a search naming a wrapped Windows removal was blocked). Result: commit `bcfa6bd`.
+
+Who did what, measured:
+
+- **Jev** (`openrouter/jev-router`, `--agent jev`, no `--auto`) returned a routing plan in
+  50s and touched nothing (`git status` clean). Two of its choices were overridden by the
+  orchestrator: it assigned the brief to the orchestrator (design says Codex) and told the
+  implementer to use the free model (design says DeepSeek V4.1 Flash). Its root-cause
+  diagnosis and its three risks were correct.
+- **Codex** (`gpt-6.1-sol`, effort medium, read-only) wrote the implementation brief in
+  222s: exact before/after regex text for both engines, the corpus entries, the
+  must-not-break list, and failure modes. Its edits were applied unchanged.
+- **DeepSeek V4.1 Flash** (OpenCode CLI, `--auto`) applied all four files in 318s and then
+  the session died with `exit 2 / Unknown error`. What was verified is the diff, not the
+  report - the reason the harness forbids trusting self-reports.
+- **Codex** verified: `VERDICT: PASS`, and it stated plainly which claims its read-only
+  sandbox could not test rather than asserting them.
+- **Gemini 3.8 Flash high** (Antigravity CLI, `--allow-tools`, 462s) reviewed independently
+  and earned its keep twice: it corrected the verifier's pattern count (44 in
+  `BLOCK_PATTERNS`, not the 65 a whole-file regex had counted) and found three gaps nobody
+  else saw - a system tree inside a wrapped payload and chained commands inside a wrapped
+  payload, all of which the orchestrator then re-ran to confirm in both engines.
+- **Orchestrator**: 17-command probe through both engines (17/17), three mutation runs
+  (reverting each half of the fix made the new cases fail), 349 guard tests, full checklist
+  7/7 run exclusively, then commit.
+
+Still open, confirmed by re-running them (all predate the change; none is a regression):
+
+- a system tree inside a wrapped payload slips, because the system-tree terminator does not
+  accept a closing quote;
+- chained commands inside a wrapped payload slip, because a quoted span containing a
+  separator is blanked wholesale before matching, and the unwrapping only happens for a
+  leading wrapper.
