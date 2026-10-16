@@ -33,13 +33,13 @@ from pathlib import Path
 # as an xargs target. A bare `rm\s+` also matched `docker run --rm -v /var/...`
 # and `rg "rm /" .`, and blocked both. An over-block is worse than a miss here:
 # a guard that blocks routine work gets switched off.
-_RM_CMD = r"(?:^|[;&|\n]\s*|\bxargs\s+(?:-\S+\s+)*|\b(?:sudo|env|nice|nohup|command|time)\s+(?:\w+=\S*\s+)*)rm\s+(?:--\s+)?"
+_RM_CMD = r"(?:^|[;&|\n]\s*(?:(?:sudo\s+)?(?:bash|sh)\s+-c\s+['\"]?\s*)?|\bxargs\s+(?:-\S+\s+)*|\b(?:sudo|env|nice|nohup|command|time)\s+(?:\w+=\S*\s+)*)rm\s+(?:--\s+)?"
 # The PowerShell/cmd counterpart of command position, with the wrappers that run a
 # nested command. `rg 'Remove-Item x -Recurse -Force' .` must stay allowed: that
 # text merely NAMES the invocation, and an over-block teaches people to switch the
 # guard off, which is worse than a miss.
 _PS_CMD = (
-    r"(?:^|[;&|\n]\s*|(?:powershell|pwsh|cmd)(?:\.exe)?\s+(?:[-/]\S+\s+)*['\"]?\s*)"
+    r"(?:^|[;&|\n]\s*)(?:(?:powershell|pwsh|cmd)(?:\.exe)?\s+(?:[-/]\S+\s+)*['\"]?\s*)?"
 )
 # Only the flags that make an rm destructive, any order, and at least one of them.
 # The `+` is on a flag+separator pair rather than zero-or-more flags: a flagless

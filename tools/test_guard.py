@@ -49,6 +49,21 @@ def test_destructive_scan_ignores_data_in_quotes():
         guard.find_destructive('cmd /c "Remove-Item -Recurse -Force C:\\\\data"')
         is not None
     )
+    # A shell wrapper after a separator, which normalize_command only unwraps at
+    # the start of the command, must still be caught.
+    assert guard.find_destructive("echo hi && bash -c 'rm -rf /'") is not None
+    assert guard.find_destructive("true; sh -c 'rm -rf /'") is not None
+    # The same wrapper inside quoted search text is data, not command position.
+    assert (
+        guard.find_destructive("rg 'cmd /c \"Remove-Item -Recurse -Force C:\\data\"' .")
+        is None
+    )
+    assert (
+        guard.find_destructive(
+            "rg 'powershell -Command \"Remove-Item -Recurse -Force C:\\data\"' ."
+        )
+        is None
+    )
 
 
 def run_self_test():

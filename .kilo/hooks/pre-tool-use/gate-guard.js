@@ -35,11 +35,11 @@ const MAX_STDIN = 1024 * 1024;
 // in normalize_command(). Handling them here instead caused a divergence: Kilo
 // blocked `echo "bash -c 'rm -rf /'"` (matched the quoted wrapper) while Claude
 // allowed it.
-const RM_CMD = '(?:^|[;&|\\n]\\s*|\\bxargs\\s+(?:-\\S+\\s+)*|\\b(?:sudo|env|nice|nohup|command|time)\\s+(?:\\w+=\\S*\\s+)*)rm\\s+(?:--\\s+)?';
+const RM_CMD = '(?:^|[;&|\\n]\\s*(?:(?:sudo\\s+)?(?:bash|sh)\\s+-c\\s+[\'"]?\\s*)?|\\bxargs\\s+(?:-\\S+\\s+)*|\\b(?:sudo|env|nice|nohup|command|time)\\s+(?:\\w+=\\S*\\s+)*)rm\\s+(?:--\\s+)?';
 // PowerShell/cmd counterpart of command position, with the wrappers that run a
 // nested command: `rg 'Remove-Item x -Recurse -Force' .` must stay allowed, since
 // that text only names the invocation.
-const PS_CMD = '(?:^|[;&|\\n]\\s*|(?:powershell|pwsh|cmd)(?:\\.exe)?\\s+(?:[-/]\\S+\\s+)*[\'"]?\\s*)';
+const PS_CMD = '(?:^|[;&|\\n]\\s*)(?:(?:powershell|pwsh|cmd)(?:\\.exe)?\\s+(?:[-/]\\S+\\s+)*[\'"]?\\s*)?';
 // At least one destructive flag (`+` on a flag+separator pair): a flagless `rm`
 // cannot remove a directory, and matching zero flags made `rm *.tmp` and
 // `rm /tmp/test.pid` look like recursive wipes. A short bundle may mix in benign
