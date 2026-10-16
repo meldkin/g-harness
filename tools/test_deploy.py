@@ -613,7 +613,7 @@ def test_upgrade_note_names_legacy_docs_and_deletes_nothing(tmp_path: Path) -> N
     """
     proj = tmp_path / "old-harness"
     (proj / "docs").mkdir(parents=True)
-    _write(proj / "SPEC.md", "# Specification v4.1.0\n")
+    _write(proj / "SPEC.md", "# Solo-Code-Harness - Specification (SPEC) v4.1.0\n")
     _write(proj / "docs" / "deepseek-harness-upgrade-review-plan.md", "old doc\n")
 
     result = subprocess.run(
@@ -623,13 +623,39 @@ def test_upgrade_note_names_legacy_docs_and_deletes_nothing(tmp_path: Path) -> N
         check=False,
     )
 
-    assert "looks like an earlier harness" in result.stdout, result.stdout[-800:]
-    tail = result.stdout.split("looks like an earlier harness", 1)[1]
+    assert "from an earlier harness" in result.stdout, result.stdout[-800:]
+    tail = result.stdout.split("from an earlier harness", 1)[1]
     assert "SPEC.md" in tail, "the note must name the file the operator has to look at"
+    assert "docs/deepseek-harness-upgrade-review-plan.md" in tail
     assert (proj / "SPEC.md").is_file(), (
         "a project-owned root doc must survive an upgrade"
     )
     assert (proj / "docs" / "deepseek-harness-upgrade-review-plan.md").is_file()
+
+
+def test_upgrade_note_ignores_a_projects_own_spec_md(tmp_path: Path) -> None:
+    """A SPEC.md the project wrote is not evidence of an earlier harness.
+
+    This is the line the first version got wrong: it triggered on the file's existence, so any
+    target that happened to keep its own SPEC.md was told it carried harness debris.
+    """
+    proj = tmp_path / "own-spec"
+    (proj / "docs").mkdir(parents=True)
+    _write(
+        proj / "SPEC.md",
+        "# Acme Platform - Specification v1\n\nOwned by the project.\n",
+    )
+    _write(proj / "docs" / "architecture.md", "# Architecture\n")
+
+    result = subprocess.run(
+        [sys.executable, str(deploy.__file__), "deploy", str(proj), "--yes"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert "from an earlier harness" not in result.stdout, result.stdout[-800:]
+    assert (proj / "SPEC.md").is_file(), "the project's own spec must survive untouched"
 
 
 def test_upgrade_note_is_silent_for_a_fresh_target(tmp_path: Path) -> None:
@@ -644,4 +670,4 @@ def test_upgrade_note_is_silent_for_a_fresh_target(tmp_path: Path) -> None:
         check=False,
     )
 
-    assert "looks like an earlier harness" not in result.stdout
+    assert "from an earlier harness" not in result.stdout

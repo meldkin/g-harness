@@ -144,6 +144,68 @@ RETIRED_SHARED_FILES = {
     "tools/test_harness.py",  # split into tools/test_*.py
 }
 
+# Documents the v4.1.0 deploy shipped into `docs/` and the current one no longer ships. Cleanup must
+# never delete from `docs/` (a target's docs are project-owned), so these names only feed the
+# upgrade note. Matched by exact name, not by content: only 13 of the 27 carry a Solo-Code marker.
+# Five of the originals are absent on purpose - README.md, evaluation-report.md, capability-seams.md,
+# code-review-checklist.md and defensive-patterns.md are names a project plausibly owns, and a note
+# that calls a project's own file harness debris is the exact false claim this list must avoid.
+LEGACY_HARNESS_DOCS = {
+    "antigravity-telemetry-hook.md",
+    "audit-2026-08-15.md",
+    "audit-2026-09-04.md",
+    "audit-2026-09-11.md",
+    "codex-antigravity-cross-review-report.md",
+    "deepseek-cross-review-antigravity-round2.md",
+    "deepseek-cross-review-antigravity.md",
+    "deepseek-harness-upgrade-acceptance.md",
+    "deepseek-harness-upgrade-final-review.md",
+    "deepseek-harness-upgrade-review-followup.md",
+    "deepseek-harness-upgrade-review-plan.md",
+    "deepseek-harness-upgrade-review-response-round2.md",
+    "deepseek-harness-upgrade-review-response.md",
+    "dsh-port-map.md",
+    "dsh-port-plan.md",
+    "executor-benchmark-2026-09-04.md",
+    "handoff-2026-09-11.md",
+    "lifecycle-matrix-verification.md",
+    "review-open-code-review-2026-09-16.md",
+    "upgrade-summary.md",
+    "work-report-2026-09-16.md",
+    "work-report-2026-09-27.md",
+}
+
+
+def _legacy_harness_leftovers(target: Path) -> list[str]:
+    """Root documents an earlier harness deployed that this one no longer owns.
+
+    Detection is by content for SPEC.md (the marker the harness writes on its first line) and by
+    exact name for docs/. Never by bare existence: a target's own SPEC.md is a project file, and
+    sharing the name must not turn it into an upgrade claim.
+    """
+    leftovers: list[str] = []
+    spec = target / "SPEC.md"
+    if spec.is_file():
+        try:
+            head = spec.read_text(encoding="utf-8", errors="replace")[:2000]
+        except OSError:
+            head = ""
+        if "Solo-Code-Harness" in head:
+            leftovers.append(
+                "SPEC.md (the earlier harness's specification, dev-only since v4.3.0)"
+            )
+    docs_dir = target / "docs"
+    if docs_dir.is_dir():
+        names = sorted(
+            p.name for p in docs_dir.glob("*.md") if p.name in LEGACY_HARNESS_DOCS
+        )
+        if names:
+            shown = ", ".join(f"docs/{name}" for name in names[:3])
+            more = f" and {len(names) - 3} more" if len(names) > 3 else ""
+            leftovers.append(f"{shown}{more}")
+    return leftovers
+
+
 # Directories to copy (relative to ROOT)
 DIRS_ALL = [
     ".codex",
@@ -1578,25 +1640,19 @@ def deploy(
 
     if not dry_run:
         # An upgrade from an earlier harness leaves its root documents behind, and this deploy must
-        # not touch them: a target's SPEC.md and docs/ are classified as project-owned (a project may
-        # keep its own spec there), so cleanup may never delete them. Say so instead of silently
-        # leaving a stale v4.1.0 SPEC in place.
-        legacy = []
-        if (target_path / "SPEC.md").is_file():
-            legacy.append("SPEC.md")
-        docs_dir = target_path / "docs"
-        if docs_dir.is_dir() and any(docs_dir.glob("deepseek-harness-upgrade-*.md")):
-            legacy.append("docs/ (harness dev docs from an earlier version)")
+        # not touch them: a target's SPEC.md and docs/ are classified as project-owned, so cleanup
+        # may never delete them. Say so instead of silently leaving a stale specification in place.
+        legacy = _legacy_harness_leftovers(target_path)
         if legacy:
             print()
-            print("  NOTE: this target looks like an earlier harness - it carries:")
+            print("  NOTE: this target carries documents from an earlier harness:")
             for item in legacy:
                 print(f"        {item}")
             print(
-                "        Those are treated as project-owned now, so this deploy never removes them."
+                "        They are project-owned now, so this deploy never removes them -"
             )
             print(
-                "        Delete them by hand if you want the target free of stale harness docs."
+                "        delete them by hand if you want the target free of stale harness docs."
             )
 
         print()
