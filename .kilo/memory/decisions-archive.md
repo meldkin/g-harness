@@ -893,3 +893,37 @@ Process notes worth keeping:
 shell family (POSIX: single quotes literal, double quotes backslash-escaped; cmd: `^` escapes,
 `""` for quotes, backslash is only a path separator; PowerShell: backtick escapes), and make
 the bail-out per wrapper instead of per command.
+
+## 2026-10-16 - Guard closed at ten gaps; a one-shot API worker measured; providers mapped
+
+**All ten guard-review gaps are closed** (commit `29b94a8`). The last one, #10, was the
+asymmetry that only the Python engine scanned secrets typed into a command: the Kilo engine now
+mirrors all 23 shapes from that reference in its exact order, `BLOCK_PATTERNS` untouched at 44,
+`secret-scan.js` and `hooks.json` unchanged. Evidence: RED with eight failures (four block cases
+failing only on Kilo plus their parity twins), GREEN at 444 passed, the orchestrator's probe
+10/10 through both engines, and two mutations held (disabling the check fails eight tests,
+neutering one pattern fails two).
+
+**A one-shot API worker, measured against the CLI arms** (`tools/model_api.py`):
+
+| task | direct API | CLI arms |
+|---|---|---|
+| trivial prompt | **2.3s** | Kilo 6-19s, OpenCode 6-17s |
+| single-file change (~10 lines) | **22s**, patch logically correct but fenced with a hunk count off by one -> needed a manual apply | Kilo 1200-1557s for the same class |
+| multi-file brief (130 KB prompt, 38K tokens) | truncated at the token cap, then **HTTP 503 from the provider's Cloudflare worker** | Kilo applied it and ran the tests itself |
+
+The honest reading: direct calls win by 50-70x on small briefs and cannot run tests; the CLI
+loop is what multi-file work needs. Provider ceiling measured: a ~38K-token prompt with a large
+completion draws 503, so keep direct calls small. `model_api.py` strips a wrapping fence and
+records the rest as a known limitation.
+
+**Also in this pass:** `tools/env_file.py` gained the provider map (base-url env, key env,
+catalog path, chat path) as the single answer to which service a model's key comes from - the
+question that exposed the FreeModel outage; the catalog checker reuses it and its probe now
+falls back to reasoning content for the DeepSeek family; `.harness.lock` regenerated for the
+three new harness files (114 shared paths).
+
+**A/B discipline note:** an earlier head-to-head failed on both arms simultaneously - the direct
+arm because of the 503 ceiling, the Kilo arm because the orchestrator had left another Kilo
+session running against the same server. Two works in flight against one resource is an
+orchestration error, not worker flakiness, and the run was discarded rather than reported.
