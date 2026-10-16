@@ -781,3 +781,27 @@ one-line rules stayed in `MEMORY.md`.
 - [decision] Guard hardening (2026-10-07): 33 -> 41 destructive patterns, 8 verified
   holes closed, Codex review rounds; the full finding list is in `decisions-archive.md`.
   The checklist Pytest timeout rose 120s -> 300s (suite ~95-130s on Windows).
+
+### 2026-10-16 - Gotcha: the guard reads the commit message you are writing
+
+`git commit -m "..."` puts the message inside the command string the guard inspects, so a
+message that quotes a destructive invocation literally is read as one. Measured twice on
+2026-10-16: the commit describing the new Windows-root patterns was refused because its
+message contained the wrapped form of the very pattern it documented. The guard was right
+and the message was the problem. Describe such a command in words, or leave out the
+wrapper, when the message has to mention it.
+
+### 2026-10-16 - Gotcha: never run the coverage ratchet concurrently with pytest
+
+Both runs that looked like coverage regressions were measurement artifacts. The ratchet
+invokes `pytest tools/` with `--basetemp` under the same `.pytest_temp` (and shares
+`.pytest_cache`); a second pytest process started while it was running distorts the result.
+Measured on identical code: the concurrent run reported `.claude/hooks/guard.py` at 35.8%
+and `tools/test_guard.py` at 34.1%, while an exclusive run of the same command reported
+50.6% and 68.3% - the latter being +11.2% over the committed baseline. Serialize the gate:
+nothing else may run pytest while the ratchet (or `checklist.py`, which calls it) is active.
+
+### 2026-10-16 - Measured: the suite is 1276 passed / 1 skipped
+
+Full `pytest tools/` with the ratchet's own coverage flags: 1276 passed, 1 skipped, 15
+warnings in 144s. Earlier notes citing 1161-1262 predate this session's additions.
