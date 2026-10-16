@@ -139,14 +139,6 @@
             "output": 128000
           }
         },
-        "ling-3.1-flash": {
-          "modelID": "inclusionai/ling-3.1-flash:free",
-          "name": "Ling 3.1 Flash",
-          "limit": {
-            "context": 262144,
-            "output": 131072
-          }
-        },
         "mimo-v2.6-pro": {
           "modelID": "xiaomi/mimo-v2.6-pro",
           "name": "MiMo V2.6 Pro",
@@ -329,14 +321,6 @@
           "limit": {
             "context": 1126400,
             "output": 128000
-          }
-        },
-        "ling-3.0-flash-sante": {
-          "modelID": "inclusionai/ling-3.0-flash-sante:free",
-          "name": "Ling 3.0 Flash SanteFree",
-          "limit": {
-            "context": 268288,
-            "output": 65536
           }
         },
         "ling-3.1-flash-paid": {
@@ -569,6 +553,174 @@
           "limit": {
             "context": 1024000,
             "output": 65536
+          }
+        },
+        "claude-sonnet-5": {
+          "modelID": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+          "limit": {
+            "context": 1000000
+          }
+        },
+        "claude-sonnet-4-6": {
+          "modelID": "claude-sonnet-4-6",
+          "name": "Claude Sonnet 4.6",
+          "limit": {
+            "context": 1000000
+          }
+        },
+        "claude-fable-5-1": {
+          "modelID": "claude-fable-5-1",
+          "name": "Claude Fable 5.1",
+          "limit": {
+            "context": 1000000
+          }
+        },
+        "claude-fable-5": {
+          "modelID": "claude-fable-5",
+          "name": "Claude Fable 5",
+          "limit": {
+            "context": 1000000
+          }
+        },
+        "claude-opus-5": {
+          "modelID": "claude-opus-5",
+          "name": "Claude Opus 5",
+          "limit": {
+            "context": 1000000
+          }
+        },
+        "claude-opus-4-8": {
+          "modelID": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+          "limit": {
+            "context": 1000000
+          }
+        },
+        "claude-opus-4-7": {
+          "modelID": "claude-opus-4-7",
+          "name": "Claude Opus 4.7",
+          "limit": {
+            "context": 1000000
+          }
+        },
+        "claude-haiku-4-5-20251001": {
+          "modelID": "claude-haiku-4-5-20251001",
+          "name": "Claude Haiku 4.5",
+          "limit": {
+            "context": 200000
+          }
+        },
+        "gpt-6-astra": {
+          "modelID": "gpt-6-astra",
+          "name": "GPT-6 Astra",
+          "limit": {
+            "context": 1050000
+          }
+        },
+        "gpt-5.6-terra": {
+          "modelID": "gpt-5.6-terra",
+          "name": "GPT-5.6 Terra",
+          "limit": {
+            "context": 1050000
+          }
+        },
+        "gpt-5.5": {
+          "modelID": "gpt-5.5",
+          "name": "GPT-5.5",
+          "limit": {
+            "context": 400000
+          }
+        },
+        "gpt-5.4": {
+          "modelID": "gpt-5.4",
+          "name": "GPT-5.4",
+          "limit": {
+            "context": 400000
+          }
+        },
+        "gpt-5.3-codex": {
+          "modelID": "gpt-5.3-codex",
+          "name": "GPT-5.3 Codex",
+          "limit": {
+            "context": 400000
+          }
+        },
+        "gemini-4-argon": {
+          "modelID": "google/gemini-4-argon",
+          "name": "Gemini 4 Argon",
+          "limit": {
+            "context": 1000000
+          }
+        },
+        "gemini-3.6-flash": {
+          "modelID": "google/gemini-3.6-flash",
+          "name": "Gemini 3.6 Flash",
+          "limit": {
+            "context": 1000000
+          }
+        },
+        "gemini-3.5-flash": {
+          "modelID": "google/gemini-3.5-flash",
+          "name": "Gemini 3.5 Flash",
+          "limit": {
+            "context": 1000000
+          }
+        },
+        "gemini-3.5-flash-lite": {
+          "modelID": "google/gemini-3.5-flash-lite",
+          "name": "Gemini 3.5 Flash Lite",
+          "limit": {
+            "context": 1000000
+          }
+        },
+        "gemini-3.1-flash-lite": {
+          "modelID": "google/gemini-3.1-flash-lite",
+          "name": "Gemini 3.1 Flash Lite",
+          "limit": {
+            "context": 1000000
+          }
+        },
+        "fugu-ultra": {
+          "modelID": "sakana/fugu-ultra",
+          "name": "Fugu Ultra",
+          "limit": {
+            "context": 1000000
+          }
+        },
+        "nemotron-3.5-super-vl": {
+          "modelID": "nvidia/nemotron-3.5-super-vl",
+          "name": "Nemotron 3.5 Super VL",
+          "limit": {
+            "context": 262144
+          }
+        },
+        "cat-jam": {
+          "modelID": "stealth/cat-jam:free",
+          "name": "Cat Jam",
+          "limit": {
+            "context": 1048576
+          }
+        },
+        "muse-spark-1.1": {
+          "modelID": "meta/muse-spark-1.1",
+          "name": "Muse Spark 1.1",
+          "limit": {
+            "context": 1048576
+          }
+        },
+        "muse-spark-open": {
+          "modelID": "meta/muse-spark-open",
+          "name": "Muse Spark Open",
+          "limit": {
+            "context": 1048576
+          }
+        },
+        "muse-wonder-1.0": {
+          "modelID": "meta/muse-wonder-1.0",
+          "name": "Muse Wonder",
+          "limit": {
+            "context": 1048576
           }
         }
       }
