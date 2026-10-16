@@ -3,7 +3,8 @@
 > Consolidated 2026-10-16 from eight point-in-time reports that `docs/README.md` already
 > classified as `Historical Archive`. Each section below reproduces one source document
 > verbatim under a `Source:` heading; the original files now hold a short pointer back to
-> this archive, and git keeps their earlier history.
+> this archive, and git keeps their earlier history. Trailing whitespace was stripped so
+> the repo's pre-commit hook accepts the file; nothing else in the copied text changed.
 >
 > **Every number in here is a snapshot, not a current fact.** Measured drift when this
 > archive was assembled: pytest 452-544 passed (now ~1262), security scan 579-2518 files

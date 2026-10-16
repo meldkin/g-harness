@@ -76,13 +76,13 @@ High-signal context loaded at session start. Detailed history belongs in
   `~/.config/kilo/kilo.jsonc` (Kilo uses the full upstream id
   `commandcode/deepseek/deepseek-v4-pro`). `context_length` comes from the response, not
   the file. (2026-09-28; catalog 80 model on 2026-10-16)
-- [decision] Subagent `ask` permission behaves as `allow` (measured,
-  operator-confirmed 2026-10-07): a headless child session has no prompt
-  channel, so `effect: ask` silently permits -- the operator saw no dialog
-  appear during a two-command probe. Use explicit `allow`/`deny`; never `ask`.
-- [decision] Guard hardening (2026-10-07): 33 -> 41 destructive patterns, 8 verified
-  holes closed, Codex review rounds; the full finding list is in `decisions-archive.md`.
-  The checklist Pytest timeout rose 120s -> 300s (suite ~95-130s on Windows).
+- [decision] Subagent `ask` behaves as `allow` in headless runs (2026-10-07):
+  use explicit `allow`/`deny`, never `ask`; probe detail in `decisions-archive.md`.
+- [decision] Guard hardening (2026-10-07): 33 -> 41 destructive patterns, 8 holes
+  closed, finding list in `decisions-archive.md`. Re-measured 2026-10-16: 5 of the 7
+  holes that file listed as open were already fixed; +2 Windows-root patterns
+  (`rm_win_system`, `win_remove_recurse_root`) -> 43 total, README synced. Checklist
+  Pytest timeout 120 -> 300s.
 - [decision] Coverage (2026-10-07): the 13 files that started at 0.0% have tests and
   raised baselines; detail in `decisions-archive.md`.
 - [decision] GUI worker console (2026-10-07): full detail in `decisions-archive.md`
@@ -102,20 +102,21 @@ High-signal context loaded at session start. Detailed history belongs in
 - [decision] Subagent seam implemented (2026-10-07): `tools/subagent_cli.py` provides
   the Protocol in `tools/subagent_seam.py`; `write` is deliberately not advertised.
   Version 4.3.0; full detail in `decisions-archive.md`.
-- [decision] Subagent reviewers hold `read` + `edit`, no shell for `code-reviewer`
-  (2026-10-07). Garden's "Permission drift" and "Agent tools drift" checks, and the
-  filename-only `check_agents` they replaced, are in `decisions-archive.md`.
+- [decision] Subagent reviewers: `read` + `edit`, no shell for `code-reviewer`
+  (2026-10-07); the garden checks behind it are in `decisions-archive.md`.
 - [decision] Worker confinement mechanism (2026-10-14): `tools/win_sandbox.py` —
-  Windows ACL restricted token, `--also-write` để cấp thêm root ghi, `revert` để gỡ
-  ACE; verify bằng `icacls`. Gotcha: đường CLI chỉ chạy qua subprocess thì coverage
-  không thấy. Budget: giữ số keyless của `test_e2e`.
-- [decision] G5 dừng ở nhánh restricted-token (2026-10-15): `win_sandbox.py` chặn
-  ghi đúng (40 test) **nhưng HTTPS/TLS fail dưới token hạn chế**
-  (`SEC_E_NO_CREDENTIALS`) ⇒ không bọc được worker nào của fleet (mọi worker gọi
-  API). `--confine` trong `codex_delegate` bị chặn có chủ ý; nếu cần cách ly →
-  AppContainer (chưa làm). Việc kế: G7/P2.2 (spec `plan.md` §4.1).
+  Windows ACL restricted token, `--also-write` cấp thêm root ghi, `revert` gỡ ACE,
+  verify bằng `icacls`; hai gotcha coverage/budget ở `decisions-archive.md`.
+- [decision] G5 đóng ở nhánh restricted-token (2026-10-15): cơ chế chặn ghi đúng,
+  nhưng TLS fail ⇒ không bọc được worker gọi API; chi tiết + việc kế ở
+  `decisions-archive.md`.
 - [decision] G7 control plane (2026-10-15): `session_registry.py` +
   `session_control.py` (`list`/`send`/`interrupt`/`prune`); cả 5 delegate đã ghi
   registry (seam `Popen`→`record_start(pid)`→`kill_tree` khi timeout). **Race thật**:
   interrupt bị ghi đè thành `exited` → claim `interrupting` trước khi giết.
   `send_message` chỉ cho phiên khai báo kênh (hiện chưa có).
+- [decision] Docs gộp (2026-10-16): 8 báo cáo lịch sử (upgrade-summary, audit-08-15,
+  audit-09-04, 5 file cross-review) vào
+  `docs/archive-harness-upgrade-review-and-audit-reports-2026.md` verbatim; 8 file gốc
+  thành con trỏ. Giữ standalone `deepseek-harness-upgrade-acceptance.md` +
+  `audit-2026-09-11.md`. garden.py bỏ qua docs trong `docs/` mà tên chứa review/report.

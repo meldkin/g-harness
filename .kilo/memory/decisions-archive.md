@@ -742,3 +742,42 @@ Garden gained "Permission drift" (agent `permission:` block vs `.copilot`/`.gemi
 and "Agent tools drift" (derived `.claude` `tools:`); the old `check_agents`
 compared filenames only and reported clean while the engines disagreed. Subagent
 reviewers hold `read` + `edit`, and `code-reviewer` has no shell.
+
+## 2026-10-16 — Memory compaction: entries moved out of MEMORY.md
+
+Moved verbatim so the loaded memory stays under its 8,000-char gate; the live
+one-line rules stayed in `MEMORY.md`.
+
+### subagent-ask
+
+- [decision] Subagent `ask` permission behaves as `allow` (measured,
+  operator-confirmed 2026-10-07): a headless child session has no prompt
+  channel, so `effect: ask` silently permits -- the operator saw no dialog
+  appear during a two-command probe. Use explicit `allow`/`deny`; never `ask`.
+
+### subagent-reviewers
+
+- [decision] Subagent reviewers hold `read` + `edit`, no shell for `code-reviewer`
+  (2026-10-07). Garden's "Permission drift" and "Agent tools drift" checks, and the
+  filename-only `check_agents` they replaced, are in `decisions-archive.md`.
+
+### confinement-coverage
+
+- [decision] Worker confinement mechanism (2026-10-14): `tools/win_sandbox.py` —
+  Windows ACL restricted token, `--also-write` để cấp thêm root ghi, `revert` để gỡ
+  ACE; verify bằng `icacls`. Gotcha: đường CLI chỉ chạy qua subprocess thì coverage
+  không thấy. Budget: giữ số keyless của `test_e2e`.
+
+### g5-branch
+
+- [decision] G5 dừng ở nhánh restricted-token (2026-10-15): `win_sandbox.py` chặn
+  ghi đúng (40 test) **nhưng HTTPS/TLS fail dưới token hạn chế**
+  (`SEC_E_NO_CREDENTIALS`) ⇒ không bọc được worker nào của fleet (mọi worker gọi
+  API). `--confine` trong `codex_delegate` bị chặn có chủ ý; nếu cần cách ly →
+  AppContainer (chưa làm). Việc kế: G7/P2.2 (spec `plan.md` §4.1).
+
+### guard-windows-roots
+
+- [decision] Guard hardening (2026-10-07): 33 -> 41 destructive patterns, 8 verified
+  holes closed, Codex review rounds; the full finding list is in `decisions-archive.md`.
+  The checklist Pytest timeout rose 120s -> 300s (suite ~95-130s on Windows).
