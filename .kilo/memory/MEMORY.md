@@ -56,19 +56,6 @@ High-signal context loaded at session start. Detailed history belongs in
   trusting the gate.
 
 ## Decisions
-- [decision] Antigravity headless `agy.exe` delegate re-established (2026-10-06);
-  runs through `tools/antigravity_delegate.py` (read-only default, writes need
-  `--allow-dir` + `--auto-approve` with a shared-state lock and scope audit), tiers
-  `gemini-3.8-flash-{low,medium,high}`. Quota rotation and auth details are in
-  `decisions-archive.md`.
-- [decision] Antigravity headless permission behavior (measured 2026-10-06): exit codes
-  and flag caveats are archived verbatim in `decisions-archive.md`.
-- [decision] OpenCode avoids duplicate skill mirrors and uses Claude-compatible
-  skills.
-- [decision] Codex lifecycle and guard behavior is launcher-based, because Codex
-  has no project hooks. Of the gateway's aliases only `gpt-5.6-terra` routes
-  reproducibly; the rest are unstable or dead — measurements and traps are in
-  `decisions-archive.md` (2026-09-14).
 - [decision] CommandCode model ids are verified against
   `GET {COMMANDCODE_BASE_URL}/models`, never from memory. Each consumer declares models
   separately: `_PROVIDER_MODELS` in `tools/opencode_engine.py` (OpenCode uses the harness
@@ -76,8 +63,6 @@ High-signal context loaded at session start. Detailed history belongs in
   `~/.config/kilo/kilo.jsonc` (Kilo uses the full upstream id
   `commandcode/deepseek/deepseek-v4-pro`). `context_length` comes from the response, not
   the file. (2026-09-28; catalog 80 model on 2026-10-16)
-- [decision] Subagent `ask` behaves as `allow` in headless runs (2026-10-07):
-  use explicit `allow`/`deny`, never `ask`; probe detail in `decisions-archive.md`.
 - [decision] Guard hardening (2026-10-07): 33 -> 41 destructive patterns, 8 holes closed,
   list in `decisions-archive.md`. (2026-10-16) re-measured: 5 of 7 already fixed; 3 of the 4
   left closed (+3 Windows-root patterns -> 44, README synced; quoted spans holding a
@@ -85,10 +70,6 @@ High-signal context loaded at session start. Detailed history belongs in
   it needs `hooks.json` or a JS secret list. Pipeline drills `bcfa6bd`+`c2e174f` closed the
   wrapper gap and round 2's 2 regressions; 10 quoting gaps remain (archive). Pytest timeout
   120 -> 300s.
-- [decision] Coverage (2026-10-07): the 13 files that started at 0.0% have tests and
-  raised baselines; detail in `decisions-archive.md`.
-- [decision] GUI worker console (2026-10-07): full detail in `decisions-archive.md`
-  (loopback-only stdlib web app in `tools/gui_server.py`, `.env` key NAMES only).
 - [decision] dsh worker verified (2026-10-07, re-verified 2026-10-16 `DSH_ARM_OK`): detail and
   prerequisites in `decisions-archive.md`.
 - [decision] Pipeline 4 vai trò (2026-10-16): Jev (agent trên **model JEV**
@@ -99,19 +80,6 @@ High-signal context loaded at session start. Detailed history belongs in
   wrapper chạy agent này **không `--auto`** để deny có hiệu lực. Gotcha: timeout mặc định
   của wrapper opencode/agy là **120s** → job dài bị giết oan (đã nâng 900/600); `.ps1` tải
   về bị mark-of-the-web → phải `Unblock-File`. Catalog **80 model / 4 provider**.
-- [decision] Codex worker arm (2026-10-07): full detail in `decisions-archive.md`
-  (read-only sandbox by default, brief in a file, post-run git status/diffstat).
-- [decision] Subagent seam implemented (2026-10-07): `tools/subagent_cli.py` provides
-  the Protocol in `tools/subagent_seam.py`; `write` is deliberately not advertised.
-  Version 4.3.0; full detail in `decisions-archive.md`.
-- [decision] Subagent reviewers: `read` + `edit`, no shell for `code-reviewer`
-  (2026-10-07); the garden checks behind it are in `decisions-archive.md`.
-- [decision] Worker confinement mechanism (2026-10-14): `tools/win_sandbox.py` —
-  Windows ACL restricted token, `--also-write` cấp thêm root ghi, `revert` gỡ ACE,
-  verify bằng `icacls`; hai gotcha coverage/budget ở `decisions-archive.md`.
-- [decision] G5 đóng ở nhánh restricted-token (2026-10-15): cơ chế chặn ghi đúng,
-  nhưng TLS fail ⇒ không bọc được worker gọi API; chi tiết + việc kế ở
-  `decisions-archive.md`.
 - [decision] G7 control plane (2026-10-15): `session_registry.py` +
   `session_control.py` (`list`/`send`/`interrupt`/`prune`); cả 5 delegate đã ghi
   registry (seam `Popen`→`record_start(pid)`→`kill_tree` khi timeout). **Race thật**:
@@ -122,3 +90,21 @@ High-signal context loaded at session start. Detailed history belongs in
   `docs/archive-harness-upgrade-review-and-audit-reports-2026.md` verbatim; 8 file gốc
   thành con trỏ. Giữ standalone `deepseek-harness-upgrade-acceptance.md` +
   `audit-2026-09-11.md`. garden.py bỏ qua docs trong `docs/` mà tên chứa review/report.
+- [decision] Parity launcher ↔ delegate về biến môi trường (2026-10-16): chỉ cắt `/v1` ở biến mà
+  config sinh ra **thêm** `/v1` — hiện chỉ `OPENAI_BASE_URL`; `COMMANDCODE_BASE_URL` và
+  `DEEPSEEK_BASE_URL` dùng **nguyên văn**. Cắt `/v1` của commandcode từng làm mọi call delegate
+  hỏng (A/B cùng call: `Unknown error` → `OK` 8.2s). `tools/test_env_file.py` suy luật **từ chính**
+  `.opencode/opencode.json`, nên thêm provider có template `/v1` là test đỏ ngay. Ghi chú: launcher
+  xuất **mọi** key `.env` bằng vòng lặp chung nên nó và `env_file.py` đã ngang nhau — audit chỉ grep
+  `$env:NAME =` sẽ báo thiếu biến oan.
+- [decision] Nhận diện "harness cũ" ở target (2026-10-16): theo **nội dung** cho `SPEC.md` (marker
+  harness ghi ở dòng đầu) và theo **đúng tên** cho `docs/`; **không bao giờ** theo sự tồn tại hay
+  tên đơn thuần — `SPEC.md` và `docs/` là project-owned (deploy không được xoá). Chỉ liệt kê 22/27
+  tên tài liệu v4.1.0; bỏ `README.md`, `evaluation-report.md`, `capability-seams.md`,
+  `code-review-checklist.md`, `defensive-patterns.md` vì dự án cũng có thể sở hữu tên đó. Note chỉ
+  **báo tên**, không xoá gì.
+- [decision] Bất đối xứng store credential (2026-10-16, chủ dự án quyết "để nguyên"):
+  `opencode-env.ps1` đăng xuất credential `freemodel` đã lưu mỗi lần chạy (key lưu sẵn che key
+  `.env`), `tools/opencode_delegate.py` **không** đụng store. Hôm nay chưa đo được lỗi vì FreeModel
+  đang lấy từ env → không mirror, chỉ ghi nhận; nếu về sau delegate báo Unauthorized với freemodel
+  thì đây là nguyên nhân đầu tiên cần loại trừ.

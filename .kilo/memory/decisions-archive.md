@@ -1021,3 +1021,72 @@ and the fence adds `~/.local/bin` to PATH, which a non-interactive shell lacks.
 
 Open options, agreed but not started: docker (CLI present, daemon not running) and running dsh
 inside WSL to use its bwrap-based sandbox packages, which are inert on Windows.
+
+### 2026-10-16 - The /v1 stripping bug, and a note that accused projects of carrying harness debris
+
+`env_file.NORMALIZE_BASE_URLS` stripped a trailing `/v1` from `COMMANDCODE_BASE_URL`, but the
+generated provider config uses that variable verbatim (`"baseURL": "${COMMANDCODE_BASE_URL}"`) while
+it appends `/v1` only for `OPENAI_BASE_URL`. Every commandcode call through the OpenCode delegate
+therefore had the wrong endpoint. The A/B used one call: before the fix the CLI returned its unknown
+error, after it answered in 8.2 seconds. The guard is derived from ground truth rather than from
+memory - `tools/test_env_file.py` reads every templated `baseURL`, works out which variables the
+config appends `/v1` to, and asserts the list equals exactly those; a second test asserts the
+launcher derives every alias `env_file` derives.
+
+Two audit dead ends were closed on the way. A grep for `$env:NAME =` in `opencode-env.ps1` reported
+`DEEPSEEK_BASE_URL` missing, but lines 43-48 export every `.env` key through a generic loop, so
+nothing was missing and nearly a working file was "fixed". And `4.4.0` in `SPEC.md` against `4.3.1`
+in `.harness.lock` is documented in the SPEC itself as two axes - document version against engine
+version - not drift. A third alarm was a wrong path: the reference checkouts live in the parent
+`g_harness\reference`, not inside the repo.
+
+The deploy's upgrade note first decided "this target carries an earlier harness" from the mere
+existence of `SPEC.md`. That file is project-owned by the deploy's own test list, so any target
+keeping its own specification was told it carried harness debris - the same class of false claim the
+note exists to prevent. Detection is now by the marker the harness writes on the SPEC's first line,
+and the docs half matches the v4.1.0 doc set by exact name; only 22 of the 27 names are listed,
+because README.md, evaluation-report.md, capability-seams.md, code-review-checklist.md and
+defensive-patterns.md are names a project plausibly owns. Verified against the real v4.1.0 bytes
+copied into a scratch target: the note fires, names that spec and a genuine legacy doc, leaves
+`docs/README.md` alone, and deletes nothing.
+
+Decision recorded by the project owner (2026-10-16): the launcher logs out OpenCode's stored
+`freemodel` credential on every run, the delegate never touches that store, and the asymmetry stays
+as it is. No failure is measurable today because FreeModel currently resolves from the environment,
+so mirroring the logout would delete a credential the owner stored for no proven gain. If a delegate
+run ever reports Unauthorized for a freemodel model, this is the first thing to rule out.
+
+### 2026-10-16 - Decision entries moved out of MEMORY.md (verbatim)
+
+- [decision] Antigravity headless `agy.exe` delegate re-established (2026-10-06);
+  runs through `tools/antigravity_delegate.py` (read-only default, writes need
+  `--allow-dir` + `--auto-approve` with a shared-state lock and scope audit), tiers
+  `gemini-3.8-flash-{low,medium,high}`. Quota rotation and auth details are in
+  `decisions-archive.md`.
+- [decision] Antigravity headless permission behavior (measured 2026-10-06): exit codes
+  and flag caveats are archived verbatim in `decisions-archive.md`.
+- [decision] OpenCode avoids duplicate skill mirrors and uses Claude-compatible
+  skills.
+- [decision] Codex lifecycle and guard behavior is launcher-based, because Codex
+  has no project hooks. Of the gateway's aliases only `gpt-5.6-terra` routes
+  reproducibly; the rest are unstable or dead — measurements and traps are in
+  `decisions-archive.md` (2026-09-14).
+- [decision] Subagent `ask` behaves as `allow` in headless runs (2026-10-07):
+  use explicit `allow`/`deny`, never `ask`; probe detail in `decisions-archive.md`.
+- [decision] Coverage (2026-10-07): the 13 files that started at 0.0% have tests and
+  raised baselines; detail in `decisions-archive.md`.
+- [decision] GUI worker console (2026-10-07): full detail in `decisions-archive.md`
+  (loopback-only stdlib web app in `tools/gui_server.py`, `.env` key NAMES only).
+- [decision] Codex worker arm (2026-10-07): full detail in `decisions-archive.md`
+  (read-only sandbox by default, brief in a file, post-run git status/diffstat).
+- [decision] Subagent seam implemented (2026-10-07): `tools/subagent_cli.py` provides
+  the Protocol in `tools/subagent_seam.py`; `write` is deliberately not advertised.
+  Version 4.3.0; full detail in `decisions-archive.md`.
+- [decision] Subagent reviewers: `read` + `edit`, no shell for `code-reviewer`
+  (2026-10-07); the garden checks behind it are in `decisions-archive.md`.
+- [decision] Worker confinement mechanism (2026-10-14): `tools/win_sandbox.py` —
+  Windows ACL restricted token, `--also-write` cấp thêm root ghi, `revert` gỡ ACE,
+  verify bằng `icacls`; hai gotcha coverage/budget ở `decisions-archive.md`.
+- [decision] G5 đóng ở nhánh restricted-token (2026-10-15): cơ chế chặn ghi đúng,
+  nhưng TLS fail ⇒ không bọc được worker gọi API; chi tiết + việc kế ở
+  `decisions-archive.md`.
