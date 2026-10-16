@@ -11,7 +11,7 @@
 [harness]
 version = "4.3.1"
 source = "solo-code-io/solo-code-cli"
-generated_at = "2026-10-15T16:07:27Z"
+generated_at = "2026-10-16T01:33:44Z"
 
 # --- ENGINE STATUS (v4.3.1) ---
 # .opencode/  -> first-class primary agent engine, now targeting OpenCode v2
@@ -208,4 +208,5 @@ files = [
 markers = [
     ".harness.lock",
     ".solocode",
+    "integrations",
 ]

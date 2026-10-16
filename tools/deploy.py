@@ -439,7 +439,7 @@ files = [
 markers = [
     ".harness.lock",
     ".solocode",
-]
+{bridge_marker}]
 """
 
 
@@ -839,6 +839,9 @@ def _generate_harness_lock(
     local_only = ""
     if root_mode and LOCAL_ONLY_HARNESS_DIRS:
         local_only = "".join(f'    "{d}",\n' for d in sorted(LOCAL_ONLY_HARNESS_DIRS))
+    # The dsh bridge is harness content that lives in the repo rather than an engine
+    # dir. A target project never receives it, so only the root lock declares it.
+    bridge_marker = '    "integrations",\n' if root_mode else ""
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     content = HARNESS_LOCK_TEMPLATE.format(
@@ -847,6 +850,7 @@ def _generate_harness_lock(
         engine_status=HARNESS_ENGINE_STATUS.format(version=version),
         shared_note=note,
         local_only_dirs=local_only,
+        bridge_marker=bridge_marker,
         shared_files=shared_block,
     )
     lock_path = target / ".harness.lock"
