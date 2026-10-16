@@ -943,3 +943,19 @@ Both A/B attempts therefore failed for orchestration reasons, not worker reasons
 
 Rule for the next head-to-head: the arms must not share a mutable resource, and neither arm's
 output may enter the tree until both have run.
+
+### 2026-10-16 - The three unquoted-execution misses closed (commit `b65d02d`)
+
+The last open guard items are closed in both engines: an unquoted `eval` argument, an unquoted
+pipeline into a shell, and a path-qualified shell in a pipeline. The eval rule takes an optional
+opening quote and reads the argument run in its empty-quote branch (unescaping any backslash, as an
+unquoted `-c` payload does); the pipeline rule accepts a path prefix; and the pipeline input
+contributes its unquoted argument run alongside its quoted spans. Evidence: RED 7 failed -> GREEN
+457 passed (full tools suite 1393), the orchestrator's probe 17/17 through both engines, and three
+mutants held, one per mechanism.
+
+Everything the guard review produced is now closed. What remains open are two **pre-existing
+over-blocks** - an unanchored system-tree pattern that blocks a search merely naming it, and the
+quote-parity leak after an unwrapped unclosed quote. Both are nuisances recorded earlier in this
+archive, not security holes; closing them means rewriting how masking pairs quotes, which is a
+round of its own.
