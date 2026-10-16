@@ -78,10 +78,11 @@ High-signal context loaded at session start. Detailed history belongs in
   the file. (2026-09-28; catalog 80 model on 2026-10-16)
 - [decision] Subagent `ask` behaves as `allow` in headless runs (2026-10-07):
   use explicit `allow`/`deny`, never `ask`; probe detail in `decisions-archive.md`.
-- [decision] Guard hardening (2026-10-07): 33 -> 41 destructive patterns, 8 holes
-  closed, finding list in `decisions-archive.md`. Re-measured 2026-10-16: 5 of the 7
-  holes that file listed as open were already fixed; +2 Windows-root patterns
-  (`rm_win_system`, `win_remove_recurse_root`) -> 43 total, README synced. Checklist
+- [decision] Guard hardening (2026-10-07): 33 -> 41 destructive patterns, 8 holes closed,
+  list in `decisions-archive.md`. (2026-10-16) re-measured: 5 of 7 already fixed; of the 4
+  left, 3 closed (+3 Windows-root patterns -> 44, README synced; separator-bearing quoted
+  spans blanked so `rg 'echo x; diskpart' .` reads as data). The 4th (secrets in a Kilo
+  command unscanned) stays open: fixing it needs `hooks.json` or a JS secret list.
   Pytest timeout 120 -> 300s.
 - [decision] Coverage (2026-10-07): the 13 files that started at 0.0% have tests and
   raised baselines; detail in `decisions-archive.md`.

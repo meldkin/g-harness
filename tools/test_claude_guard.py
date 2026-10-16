@@ -78,6 +78,11 @@ BLOCKED_COMMANDS = [
     "rm -rf C:\\",
     "rm -rf 'C:/Windows'",
     "Remove-Item -Recurse C:\\",
+    # Flag order reversed, and the wrapped form: the pattern used to read only
+    # flag-then-target, and a nested PowerShell invocation must still be caught.
+    "Remove-Item C:/ -Recurse",
+    "Remove-Item C:\\Windows -Recurse",
+    'powershell -Command "Remove-Item -Recurse -Force C:\\data"',
     # Verified bypasses, 2026-10-07. The old `rm\s+-rf?\s+/` accepted only the
     # `-r`/`-rf` flag order, `rm_no_preserve` required the flag immediately after
     # `rm `, `force_push_main` required the flag before the branch name, and
@@ -230,6 +235,11 @@ SAFE_COMMANDS = [
     "Remove-Item -Recurse build",
     "Remove-Item -Recurse C:\\tmp\\work",
     "rm -rf C:\\tmp\\work",
+    # Over-blocks the 2026-10-16 review measured in both engines: text that merely
+    # NAMES a command, and a separator inside a quoted search pattern.
+    "rg 'Remove-Item x -Recurse -Force' .",
+    "rg 'echo x; diskpart' .",
+    "rg 'a|b' .",
     # Regression guard for the anchoring fix. Every one of these was BLOCKED by
     # the previous pattern set: `rm\s+` matched inside `--rm`, inside a quoted
     # `rg` pattern and after `echo`, and `force_push_any`'s `.*` crossed a shell

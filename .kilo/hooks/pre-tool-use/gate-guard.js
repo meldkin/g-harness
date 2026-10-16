@@ -36,6 +36,10 @@ const MAX_STDIN = 1024 * 1024;
 // blocked `echo "bash -c 'rm -rf /'"` (matched the quoted wrapper) while Claude
 // allowed it.
 const RM_CMD = '(?:^|[;&|\\n]\\s*|\\bxargs\\s+(?:-\\S+\\s+)*|\\b(?:sudo|env|nice|nohup|command|time)\\s+(?:\\w+=\\S*\\s+)*)rm\\s+(?:--\\s+)?';
+// PowerShell/cmd counterpart of command position, with the wrappers that run a
+// nested command: `rg 'Remove-Item x -Recurse -Force' .` must stay allowed, since
+// that text only names the invocation.
+const PS_CMD = '(?:^|[;&|\\n]\\s*|(?:powershell|pwsh|cmd)(?:\\.exe)?\\s+(?:-\\S+\\s+)*[\'"]?\\s*)';
 // At least one destructive flag (`+` on a flag+separator pair): a flagless `rm`
 // cannot remove a directory, and matching zero flags made `rm *.tmp` and
 // `rm /tmp/test.pid` look like recursive wipes. A short bundle may mix in benign
@@ -78,7 +82,10 @@ const BLOCK_PATTERNS = [
   // on 2026-10-16 in both engines: `rm -rf C:/Windows`, `Remove-Item -Recurse C:\`.
   // A plain directory stays allowed; only a drive root or a system tree matches.
   { name: 'rm_win_system', pattern: new RegExp(RM_CMD + RM_FLAGS + WIN_SYSTEM, 'i') },
-  { name: 'win_remove_recurse_root', pattern: new RegExp('(?:^|[;&|\\n]\\s*)Remove-Item\\b[^|;&\\n]*-Recurse\\b[^|;&\\n]*' + WIN_SYSTEM, 'i') },
+  { name: 'win_remove_recurse_root', pattern: new RegExp(PS_CMD + 'Remove-Item\\b[^|;&\\n]*-Recurse\\b[^|;&\\n]*' + WIN_SYSTEM, 'i') },
+  // Flag order reversed: `Remove-Item C:/ -Recurse` stayed open on 2026-10-16
+  // because the pattern above only reads flag-then-target.
+  { name: 'win_remove_root_then_recurse', pattern: new RegExp(PS_CMD + 'Remove-Item\\b[^|;&\\n]*' + WIN_SYSTEM + '[^|;&\\n]*-Recurse\\b', 'i') },
   { name: 'force_push_main', pattern: /(?:^|[;&|]\s*)git\s+(?:-C\s+\S+\s+|-c\s+\S+\s+|--\S+\s+)*push\b[^&|;\n]*(?:--force|-f)\s+[^&|;\n]*(?:main|master)/ },
   // The segment stops at a shell separator, because
   // `git push origin main && npm install --force` was being read as a force-push.
@@ -125,7 +132,7 @@ const BLOCK_PATTERNS = [
   { name: 'win_del_force', pattern: /del\s+\/f\s+\/s/ },
   { name: 'win_rd_recursive', pattern: /(?:rd|rmdir)\s+(?:.*\s)?\/s\b/i },
   { name: 'win_del_any', pattern: /del\s+(?:.*\s)?\/[qsf]\b/i },
-  { name: 'win_remove_recursive', pattern: /Remove-Item\s+.*-Recurse.*-Force/i },
+  { name: 'win_remove_recursive', pattern: new RegExp(PS_CMD + 'Remove-Item\\b[^|;&\\n]*-Recurse\\b[^|;&\\n]*-Force\\b', 'i') },
   { name: 'win_format_volume', pattern: /(?:^|[;&|]\s*)Format-Volume\b/i },
   { name: 'win_stop_computer', pattern: /(?:^|[;&|]\s*)Stop-Computer\b/i },
   { name: 'win_restart_computer', pattern: /(?:^|[;&|]\s*)Restart-Computer\b/i },
@@ -246,6 +253,34 @@ function normalizeCommand(command) {
   return cmd;
 }
 
+// Blank quoted spans that contain a shell separator. `rg 'echo x; diskpart' .` was
+// blocked because the `;` inside the quotes read as a separator, putting `diskpart`
+// in command position. Only spans containing a separator are blanked, so a quoted
+// root keeps its protection (`rm -rf '/'` must stay blocked) and a wrapper's quoted
+// command is left alone (normalizeCommand unwraps it before this runs).
+function maskSeparatorQuotes(command) {
+  if (!command || typeof command !== 'string') return '';
+  let out = '';
+  let index = 0;
+  while (index < command.length) {
+    const char = command[index];
+    if (char !== "'" && char !== '"') {
+      out += char;
+      index += 1;
+      continue;
+    }
+    const end = command.indexOf(char, index + 1);
+    if (end === -1) {
+      out += command.slice(index);
+      break;
+    }
+    const span = command.slice(index, end + 1);
+    out += /[;&|]/.test(span) ? "''" : span;
+    index = end + 1;
+  }
+  return out;
+}
+
 function checkPatterns(patterns, command) {
   for (const { name, pattern, message } of patterns) {
     try {
@@ -310,10 +345,12 @@ process.stdin.on('end', () => {
     const command = toolInput.command || toolInput.CommandLine || toolInput.cmd || toolInput.commandLine || '';
 
     // 1. BLOCK destructive patterns (raw, then unwrapped -- mirrors guard.py's
-    //    find_destructive, which checks command and normalize_command(command))
+    //    find_destructive, which checks command and normalize_command(command)).
+    //    Separator-bearing quoted spans are blanked first so a search pattern or a
+    //    commit message that merely NAMES a command is not read as one.
     const blocked =
-      checkPatterns(BLOCK_PATTERNS, command) ||
-      checkPatterns(BLOCK_PATTERNS, normalizeCommand(command));
+      checkPatterns(BLOCK_PATTERNS, maskSeparatorQuotes(command)) ||
+      checkPatterns(BLOCK_PATTERNS, maskSeparatorQuotes(normalizeCommand(command)));
     if (blocked) {
       const alts = checkAlternatives(command);
       process.stderr.write(

@@ -34,6 +34,11 @@ from pathlib import Path
 # and `rg "rm /" .`, and blocked both. An over-block is worse than a miss here:
 # a guard that blocks routine work gets switched off.
 _RM_CMD = r"(?:^|[;&|\n]\s*|\bxargs\s+(?:-\S+\s+)*|\b(?:sudo|env|nice|nohup|command|time)\s+(?:\w+=\S*\s+)*)rm\s+(?:--\s+)?"
+# The PowerShell/cmd counterpart of command position, with the wrappers that run a
+# nested command. `rg 'Remove-Item x -Recurse -Force' .` must stay allowed: that
+# text merely NAMES the invocation, and an over-block teaches people to switch the
+# guard off, which is worse than a miss.
+_PS_CMD = r"(?:^|[;&|\n]\s*|(?:powershell|pwsh|cmd)(?:\.exe)?\s+(?:-\S+\s+)*['\"]?\s*)"
 # Only the flags that make an rm destructive, any order, and at least one of them.
 # The `+` is on a flag+separator pair rather than zero-or-more flags: a flagless
 # `rm` cannot remove a directory, and matching zero flags made `rm *.tmp` and
@@ -158,7 +163,12 @@ BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("shred", re.compile(r"shred\s+")),
     ("dev_write", re.compile(r">\s*/dev/sd[a-z]")),
     ("win_del_force", re.compile(r"del\s+/f\s+/s")),
-    ("win_remove_recursive", re.compile(r"Remove-Item\s+.*-Recurse.*-Force", re.I)),
+    (
+        "win_remove_recursive",
+        re.compile(
+            rf"{_PS_CMD}Remove-Item\b[^|;&\n]*-Recurse\b[^|;&\n]*-Force\b", re.I
+        ),
+    ),
     # Anchored to a real format invocation: `format` in command position with a
     # drive letter or /fs: switch. A bare \bformat\s also matched
     # `--output-format json`, so the guard blocked ruff and grep -- and a guard
@@ -240,8 +250,15 @@ BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "win_remove_recurse_root",
         re.compile(
-            rf"(?:^|[;&|\n]\s*)Remove-Item\b[^|;&\n]*-Recurse\b[^|;&\n]*{_WIN_SYSTEM}",
-            re.I,
+            rf"{_PS_CMD}Remove-Item\b[^|;&\n]*-Recurse\b[^|;&\n]*{_WIN_SYSTEM}", re.I
+        ),
+    ),
+    # Flag order reversed: `Remove-Item C:/ -Recurse` stayed open on 2026-10-16
+    # because the pattern above only reads flag-then-target.
+    (
+        "win_remove_root_then_recurse",
+        re.compile(
+            rf"{_PS_CMD}Remove-Item\b[^|;&\n]*{_WIN_SYSTEM}[^|;&\n]*-Recurse\b", re.I
         ),
     ),
     ("win_format_volume", re.compile(r"(?:^|[;&|]\s*)Format-Volume\b", re.I)),
@@ -418,12 +435,40 @@ def normalize_command(command: str) -> str:
     return cmd
 
 
+def mask_separator_quotes(command: str) -> str:
+    """Blank quoted spans that contain a shell separator.
+
+    `rg 'echo x; diskpart' .` was blocked: the `;` inside the quotes read as a
+    separator and put `diskpart` in command position. Only spans containing a
+    separator are blanked, so a quoted root keeps the protection it relies on
+    (`rm -rf '/'` must stay blocked) and a wrapper's quoted command is untouched
+    (`bash -c 'rm -rf /'` is unwrapped by normalize_command before this runs).
+    """
+    out: list[str] = []
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if char not in "'\"":
+            out.append(char)
+            index += 1
+            continue
+        end = command.find(char, index + 1)
+        if end == -1:
+            out.append(command[index:])
+            break
+        span = command[index : end + 1]
+        out.append("''" if any(sep in span for sep in ";&|") else span)
+        index = end + 1
+    return "".join(out)
+
+
 def find_destructive(command: str) -> str | None:
     for raw in (command, normalize_command(command)):
         if not raw:
             continue
+        candidate = mask_separator_quotes(raw)
         for name, pattern in BLOCK_PATTERNS:
-            if pattern.search(raw):
+            if pattern.search(candidate):
                 return name
     return None
 
