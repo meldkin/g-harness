@@ -1056,6 +1056,28 @@ as it is. No failure is measurable today because FreeModel currently resolves fr
 so mirroring the logout would delete a credential the owner stored for no proven gain. If a delegate
 run ever reports Unauthorized for a freemodel model, this is the first thing to rule out.
 
+### 2026-10-16 - Consolidating on one GitHub repo, and what a force-push does and does not keep
+
+The owner's goal is a single canonical repo. The measurements that decided where it should live:
+`solo-code-com/Solo-Code-Harness` carries 3 stars and 1 fork plus a description, while
+`solo-code-com/g-harness` has none and an empty description. Stars, forks and watchers belong to the
+repository rather than to any branch, so rewriting `main` in the older repo preserves all of them -
+consolidating into the star-bearing repo is what keeps the rating, and moving to the newer repo
+would have left it behind. `meldkin/g-harness` and `vtgiang-dotcom/Solo-Code-Harness` turned out to
+be redirects of the same two repositories, confirmed by reading `git ls-remote` on each URL.
+
+Before any rewrite, the old `main` (`6f261bd`, 208 commits, none of them covered by the v4.2.0 tag)
+was fetched into `refs/remotes/oldharness/main` and pushed to the old repo as
+`archive/main-pre-g-harness`, an additive push. Tags `v4.1.0` and `v4.2.0` are untouched by a branch
+rewrite. The rewrite itself is the owner's to run: the permission guard rejects a force-push from
+the agent, and routing it through another runtime to evade that is forbidden, so the exact
+`--force-with-lease=main:<old-sha>` command was handed over with its expected verification numbers.
+
+`reference\Solo-Code-Harness-main` (896 files, 7.1 MB) was then deleted with explicit approval:
+`git grep` shows no tracked file references it, its content survives as the archived branch and the
+release tags, and the old commits are still in this repo's object database through the fetched ref.
+`reference\deepseek-harness-master` stays, because the dsh arm needs that checkout.
+
 ### 2026-10-16 - Decision entries moved out of MEMORY.md (verbatim)
 
 - [decision] Antigravity headless `agy.exe` delegate re-established (2026-10-06);

@@ -108,3 +108,9 @@ High-signal context loaded at session start. Detailed history belongs in
   `.env`), `tools/opencode_delegate.py` **không** đụng store. Hôm nay chưa đo được lỗi vì FreeModel
   đang lấy từ env → không mirror, chỉ ghi nhận; nếu về sau delegate báo Unauthorized với freemodel
   thì đây là nguyên nhân đầu tiên cần loại trừ.
+- [decision] Hợp nhất một nguồn GitHub (2026-10-16, chủ dự án quyết): repo chính là
+  `solo-code-com/Solo-Code-Harness` — giữ 3 sao + 1 fork, vì sao/rating gắn với **repo** chứ không
+  gắn branch nên ghi đè `main` không làm mất. Mốc cũ `6f261bd` (208 commit) đã đẩy lên đó dưới nhánh
+  `archive/main-pre-g-harness`; tag `v4.1.0`/`v4.2.0` giữ nguyên. Lệnh ghi đè do chủ dự án tự chạy
+  (guard chặn agent force-push). Bản `reference\Solo-Code-Harness-main` đã xoá — không file nào
+  tham chiếu nó, object cũ vẫn ở `.git` local qua ref `oldharness/main`.
