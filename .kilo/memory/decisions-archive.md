@@ -1070,14 +1070,24 @@ Project memory survived byte for byte. The four files the doctrine names - `.kil
 hashed before and after and every SHA-256 is identical. A security scan inside the target reported
 2556 files with no issues.
 
-One thing the doctrine does not cover, found by this verification: the deploy **overwrote** five
-files the target may have customised - `.gemini/antigravity/knowledge/artifacts/project-architecture.md`,
-`anti-hallucination-rules.md`, `prose-quality-rules.md`, `security-patterns.md` and `metadata.json`.
-They are harness-shipped artifacts, but `project-architecture.md` in particular is the kind of file a
-project fills with its own content, so the "memory is never overwritten" promise has a hole in the
-`.gemini` knowledge tree. They are tracked in git, so nothing is unrecoverable (`git diff` on that
-path shows the previous text), and the open question is whether that directory should join
-`_write_blank_memory_templates()` as project memory or stay a shipped artifact. No fix decided yet.
+One thing the doctrine does not cover, found by this verification, and the first reading of it was
+wrong: five files under `.gemini/antigravity/knowledge/` looked overwritten, but their `git diff` is
+empty and only the line-ending bytes changed - they differ by CRLF against LF, no text was lost, and
+the byte-size delta is exactly one character per line. The real casualty was **`.gitignore`**: the
+deploy replaces it (it is in `ROOT_FILES`), and this target had its own rules there. Five lines
+disappeared - `*.log`, `logs/`, `source_code/lysome/backend/staticfiles/`, `*.exe` and
+`.kilo/worktrees/` - while the harness version un-ignored `.opencode/opencode.json` on purpose,
+because the v2 provider config is meant to be tracked. Everything was recoverable from git and is
+now fixed in the target: the project's rules re-added under a marker comment, the duplicates the
+first fix attempt introduced removed, and the provider config committed (three commits, tree clean,
+all five ignore rules verified with `check-ignore`).
+
+Two cautions for the next upgrade. A `git add -A --dry-run` in that target reported 1463 pending
+files under `source_code/`; a second reading minutes later reported two. The numbers were a stat-cache
+artifact of a freshly touched working tree, not content, and staging by explicit harness path list
+meant nothing of the project's own code could be swept in either way. And the open harness question
+stands: a deploy replacing a project's `.gitignore` loses rules it cannot know about, so that file
+should be merged (or written only when absent, like the memory templates) rather than overwritten.
 
 ### 2026-10-16 - Consolidating on one GitHub repo, and what a force-push does and does not keep
 
