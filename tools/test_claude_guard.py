@@ -190,6 +190,27 @@ BLOCKED_COMMANDS = [
     # forms were misses in both engines.
     "echo hi && bash -c 'rm -rf /'",
     "true; sh -c 'rm -rf /'",
+    # Round-8: a wrapper's quoted payload was masked as search data before the
+    # patterns ran, so a chained destructive command inside it was erased. The
+    # `rm -rf /etc` form also exposed rm_system_dir's terminator rejecting a
+    # closing quote. All five were misses in both engines before the fix.
+    "echo hi && bash -c 'rm -rf /etc'",
+    "echo hi && bash -c 'cd / && rm -rf /'",
+    "echo hi && bash -c 'rm -rf /; echo done'",
+    'echo hi && cmd /c "Remove-Item -Recurse -Force C:\\data; echo x"',
+    'echo hi && powershell -Command "Remove-Item -Recurse -Force C:\\data; echo x"',
+    # Round-8 follow-up by the orchestrator. Mutation testing showed the quote
+    # terminator was already protecting `rm -rf '/etc'` with no case pinning it,
+    # and that the same system tree chained inside a wrapper was still a miss.
+    "rm -rf '/etc'",
+    'rm -rf "/usr"',
+    "echo hi && bash -c 'rm -rf /etc; echo x'",
+    # Round-9: two regressions from the round-8 scanner. Both were blocked
+    # before it landed. The scanner's payload-end walk stopped at a quote the
+    # payload had escaped (or that another backslash followed), and the text it
+    # then left behind was masked as search data, erasing the wipe.
+    'bash -c "echo C:\\"; rm -rf / && echo "done"',
+    r"""bash -c 'echo '\''hi'\''; rm -rf /'""",
 ]
 
 
@@ -314,6 +335,18 @@ SAFE_COMMANDS = [
     # text, which is data, not command position -- `_PS_CMD` must not read it.
     "rg 'cmd /c \"Remove-Item -Recurse -Force C:\\data\"' .",
     "rg 'powershell -Command \"Remove-Item -Recurse -Force C:\\data\"' .",
+    # Round-8 over-block guards: the same wrapper text inside quoted search data
+    # is not command position, so naming a payload must not block the search.
+    "rg \"echo hi && bash -c 'rm -rf /etc'\" .",
+    "rg \"echo hi && bash -c 'cd / && rm -rf /'\" .",
+    "rg \"echo hi && bash -c 'rm -rf /; echo done'\" .",
+    "rg 'echo hi && cmd /c \"Remove-Item -Recurse -Force C:\\data; echo x\"' .",
+    # A search naming a quoted system tree is data too.
+    "rg \"rm -rf '/etc'\" .",
+    # Round-9 over-block guards: the two regression commands stay data when a
+    # search merely NAMES them, so closing the miss must not close the search.
+    'rg \'bash -c "echo C:\\"; rm -rf / && echo "done"\' .',
+    r"""rg "bash -c 'echo '\''hi'\''; rm -rf /'" .""",
 ]
 
 

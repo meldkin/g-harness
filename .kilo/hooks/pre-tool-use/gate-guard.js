@@ -60,7 +60,10 @@ const TARGET_PATH = '(?:' + ROOT_PATH + '(?:(?:etc|usr|var|bin|lib(?:64)?|boot|s
 // Windows spellings of the same catastrophe; TARGET_PATH carries the Unix trees.
 const WIN_SYSTEM = '[\'"]?[A-Za-z]:[/\\\\]*(?:(?:Windows|WinNT|Users|ProgramData|System32|SysWOW64|Program Files(?: \\(x86\\))?)(?:[/\\\\]|\\s|$|"|\')|(?=\\s|$|\\*|"|\'))';
 const BLOCK_PATTERNS = [
-  { name: 'rm_root', pattern: new RegExp(RM_CMD + RM_FLAGS + ROOT_PATH + '(?:\\s|$|\\*|"|\')') },
+  // A shell separator terminates a root token exactly as whitespace does:
+  // `rm -rf /; next` is the same wipe, and it is what an unwrapped
+  // `bash -c 'rm -rf /; echo done'` leaves behind.
+  { name: 'rm_root', pattern: new RegExp(RM_CMD + RM_FLAGS + ROOT_PATH + '(?:\\s|$|\\*|"|\'|;|&|\\|)') },
   // A root target that is not the first argument: `rm -rf build /`.
   { name: 'rm_root_after_other_target', pattern: new RegExp(RM_CMD + RM_FLAGS + '[^&|;\\n]*\\s+' + ROOT_PATH + '(?:\\s|$|\\*|"|\')') },
   { name: 'rm_flags_after_target', pattern: new RegExp(RM_CMD + '(?:[-\\w]+\\s+)*' + TARGET_PATH + '\\s+(?:[-\\w]+\\s+)*' + RM_FLAGS) },
@@ -74,7 +77,7 @@ const BLOCK_PATTERNS = [
   // `/home/../workspace/build`, is not blocked.
   { name: 'rm_root_escape', pattern: new RegExp(RM_CMD + RM_FLAGS + ROOT_PATH + '(?:[^/\\s]+[/\\\\])*\\.\\.(?:[/\\\\]\\.\\.)*[/\\\\]?(?=\\s|$|[;&|*])') },
   { name: 'rm_no_preserve', pattern: new RegExp(RM_CMD + '.*(?:--no-preserve-root|--preserve-root[=\\s]+no)') },
-  { name: 'rm_system_dir', pattern: new RegExp(RM_CMD + RM_FLAGS + ROOT_PATH + '(?:etc|usr|var|bin|lib(?:64)?|boot|sbin|opt|root|sys|proc|dev)(?:/|\\s|$)') },
+  { name: 'rm_system_dir', pattern: new RegExp(RM_CMD + RM_FLAGS + ROOT_PATH + '(?:etc|usr|var|bin|lib(?:64)?|boot|sbin|opt|root|sys|proc|dev)(?:/|\\s|$|"|\'|;|&|\\|)') },
   { name: 'rm_temp_linux', pattern: new RegExp(RM_CMD + RM_FLAGS + '/tmp/') },
   { name: 'rm_temp_win', pattern: new RegExp(RM_CMD + RM_FLAGS + '\\$?(?:env:)?TEMP\\b', 'i') },
   { name: 'del_temp_win', pattern: /del\s+(?:\/f\s+)?\/[qs]\s+\$?(?:env:)?TEMP\b/i },
@@ -232,6 +235,110 @@ const SAFE_ALTERNATIVES = [
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+// Port of guard.py's unwrap_command_wrappers(): a quoted payload after a
+// `bash|sh -c` or a Windows `powershell|pwsh|cmd` wrapper is executed, so its
+// separators are real command separators. The wrapper is unwrapped only where
+// the quote state and the command position both agree it is executable, so
+// search data that merely NAMES one stays untouched.
+function unwrapCommandWrappers(command) {
+  if (!command || typeof command !== 'string') return '';
+
+  function rewrite(text) {
+    let out = '';
+    let index = 0;
+    let quote = null;
+    let commandPosition = true;
+
+    while (index < text.length) {
+      const char = text[index];
+
+      if (quote === null && commandPosition) {
+        const match = text.slice(index).match(
+          /^(?:(?:(?:sudo\s+)?(?:env|nohup|nice|command|time)\s+)*(?:sudo\s+)?(?:bash|sh)\s+-c\s+(['"])|(?:powershell|pwsh|cmd)(?:\.exe)?\s+(?:[-/]\S+\s+)*(['"]))/i
+        );
+        if (match) {
+          const wrapperQuote = match[1] || match[2];
+          const payloadStart = index + match[0].length;
+          let payloadEnd = payloadStart;
+          let ambiguous = false;
+          let innerQuote = null;
+          while (payloadEnd < text.length) {
+            const charAtEnd = text[payloadEnd];
+            // A doubled quote is the Windows escape (`""hi""`) and hides where
+            // the payload really ends, so it must be tested before the plain
+            // closing-quote test below -- that test breaks on the FIRST quote
+            // of the pair.
+            if (
+              wrapperQuote === '"' &&
+              charAtEnd === '"' &&
+              payloadEnd + 1 < text.length &&
+              text[payloadEnd + 1] === '"'
+            ) {
+              ambiguous = true;
+              break;
+            }
+            if (charAtEnd === wrapperQuote) {
+              // Count the whole contiguous run of backslashes before the
+              // candidate: odd means the quote is escaped and the payload has
+              // not ended, so the parse is ambiguous.
+              let backslashes = 0;
+              let cursor = payloadEnd - 1;
+              while (cursor >= payloadStart && text[cursor] === '\\') {
+                backslashes += 1;
+                cursor -= 1;
+              }
+              if (backslashes % 2) {
+                ambiguous = true;
+                break;
+              }
+              if (innerQuote === null) break;
+            }
+            if (
+              (charAtEnd === "'" || charAtEnd === '"') &&
+              charAtEnd !== wrapperQuote
+            ) {
+              innerQuote = innerQuote === charAtEnd ? null : charAtEnd;
+            }
+            payloadEnd += 1;
+          }
+          if (
+            !ambiguous &&
+            payloadEnd < text.length &&
+            innerQuote === null &&
+            (payloadEnd + 1 === text.length || text[payloadEnd + 1] !== '\\')
+          ) {
+            out += rewrite(text.slice(payloadStart, payloadEnd));
+            index = payloadEnd + 1;
+            commandPosition = false;
+            continue;
+          }
+          // Ambiguous: hand the text back untouched so the masking path
+          // decides, rather than unwrapping on a guess.
+          return text;
+        }
+      }
+
+      if (quote === null) {
+        if (char === "'" || char === '"') quote = char;
+        else if (';&|\n'.includes(char)) commandPosition = true;
+        else if (!/\s/.test(char)) commandPosition = false;
+      } else if (
+        char === quote &&
+        (index === 0 || text[index - 1] !== '\\')
+      ) {
+        quote = null;
+      }
+
+      out += char;
+      index += 1;
+    }
+
+    return out;
+  }
+
+  return rewrite(command);
+}
+
 // Port of guard.py's normalize_command(): both engines must unwrap the same
 // wrappers or their verdicts diverge (Python normalises `sudo git push …`, so
 // without this Kilo allowed what Claude blocked). Rules match Python exactly:
@@ -240,6 +347,7 @@ const SAFE_ALTERNATIVES = [
 function normalizeCommand(command) {
   if (!command || typeof command !== 'string') return '';
   let cmd = command.replace(/\s+/g, ' ').trim();
+  cmd = unwrapCommandWrappers(cmd);
   for (;;) {
     const prev = cmd;
     cmd = cmd.replace(/^sudo\s+/, '');
@@ -257,7 +365,8 @@ function normalizeCommand(command) {
 // blocked because the `;` inside the quotes read as a separator, putting `diskpart`
 // in command position. Only spans containing a separator are blanked, so a quoted
 // root keeps its protection (`rm -rf '/'` must stay blocked) and a wrapper's quoted
-// command is left alone (normalizeCommand unwraps it before this runs).
+// command is left alone (unwrapCommandWrappers unwraps it before this runs only
+// when it is at executable command position; quoted search data stays untouched).
 function maskSeparatorQuotes(command) {
   if (!command || typeof command !== 'string') return '';
   let out = '';
@@ -345,12 +454,15 @@ process.stdin.on('end', () => {
     const command = toolInput.command || toolInput.CommandLine || toolInput.cmd || toolInput.commandLine || '';
 
     // 1. BLOCK destructive patterns (raw, then unwrapped -- mirrors guard.py's
-    //    find_destructive, which checks command and normalize_command(command)).
-    //    Separator-bearing quoted spans are blanked first so a search pattern or a
-    //    commit message that merely NAMES a command is not read as one.
+    //    find_destructive, which unwraps before masking so a wrapper's quoted
+    //    payload is read as commands, not as search data). Separator-bearing
+    //    quoted spans are blanked first so a search pattern or a commit message
+    //    that merely NAMES a command is not read as one.
+    const unwrapped = unwrapCommandWrappers(command);
+    const normalized = normalizeCommand(unwrapped);
     const blocked =
-      checkPatterns(BLOCK_PATTERNS, maskSeparatorQuotes(command)) ||
-      checkPatterns(BLOCK_PATTERNS, maskSeparatorQuotes(normalizeCommand(command)));
+      checkPatterns(BLOCK_PATTERNS, maskSeparatorQuotes(unwrapped)) ||
+      checkPatterns(BLOCK_PATTERNS, maskSeparatorQuotes(normalized));
     if (blocked) {
       const alts = checkAlternatives(command);
       process.stderr.write(

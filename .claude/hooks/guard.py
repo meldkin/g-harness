@@ -80,7 +80,13 @@ _WIN_SYSTEM = (
 )
 
 BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("rm_root", re.compile(rf"{_RM_CMD}{_RM_FLAGS}{_ROOT_PATH}(?:\s|$|\*|\"|')")),
+    # A shell separator terminates a root token exactly as whitespace does:
+    # `rm -rf /; next` is the same wipe, and it is what an unwrapped
+    # `bash -c 'rm -rf /; echo done'` leaves behind.
+    (
+        "rm_root",
+        re.compile(rf"{_RM_CMD}{_RM_FLAGS}{_ROOT_PATH}(?:\s|$|\*|\"|'|;|&|\|)"),
+    ),
     # A root target that is NOT the first argument: `rm -rf build /`. rm_root
     # needs the root directly after the flags, so a second target hid it.
     (
@@ -207,7 +213,7 @@ BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "rm_system_dir",
         re.compile(
-            rf"{_RM_CMD}{_RM_FLAGS}{_ROOT_PATH}(?:etc|usr|var|bin|lib(?:64)?|boot|sbin|opt|root|sys|proc|dev)(?:/|\s|$)"
+            rf"{_RM_CMD}{_RM_FLAGS}{_ROOT_PATH}(?:etc|usr|var|bin|lib(?:64)?|boot|sbin|opt|root|sys|proc|dev)(?:/|\s|$|\"|'|;|&|\|)"
         ),
     ),
     # Anchored to command position so a search that merely NAMES the pipe
@@ -419,11 +425,118 @@ PROTECTED_FILES: frozenset[str] = frozenset(
 )
 
 
+def unwrap_command_wrappers(command: str) -> str:
+    """Remove executable wrapper payloads only at command positions.
+
+    A quoted payload after `bash|sh -c` or a Windows `powershell|pwsh|cmd`
+    wrapper is executed, so its separators are real command separators and its
+    content must reach the block patterns. Search data that merely NAMES such a
+    wrapper is untouched: the wrapper is only unwrapped where the quote state
+    and the command position both agree it is executable. When the payload's
+    closing quote cannot be located unambiguously the text is returned
+    unchanged, so `mask_separator_quotes` still decides.
+    """
+    if not command:
+        return ""
+
+    def rewrite(text: str) -> str:
+        out: list[str] = []
+        index = 0
+        quote: str | None = None
+        command_position = True
+
+        while index < len(text):
+            char = text[index]
+
+            if quote is None and command_position:
+                match = re.match(
+                    r"(?:(?:sudo\s+)?(?:env|nohup|nice|command|time)\s+)*"
+                    r"(?:sudo\s+)?(?:bash|sh)\s+-c\s+(['\"])"
+                    r"|(?:powershell|pwsh|cmd)(?:\.exe)?\s+"
+                    r"(?:[-/]\S+\s+)*(['\"])",
+                    text[index:],
+                    re.I,
+                )
+                if match:
+                    wrapper_quote = match.group(1) or match.group(2)
+                    payload_start = index + match.end()
+                    payload_end = payload_start
+                    ambiguous = False
+                    inner_quote: str | None = None
+                    while payload_end < len(text):
+                        char_at_end = text[payload_end]
+                        # A doubled quote is the Windows escape (`""hi""`) and
+                        # hides where the payload really ends, so it must be
+                        # tested before the plain closing-quote test below --
+                        # that test breaks on the FIRST quote of the pair.
+                        if (
+                            wrapper_quote == '"'
+                            and char_at_end == '"'
+                            and payload_end + 1 < len(text)
+                            and text[payload_end + 1] == '"'
+                        ):
+                            ambiguous = True
+                            break
+                        if char_at_end == wrapper_quote:
+                            # Count the whole contiguous run of backslashes before
+                            # the candidate: odd means the quote is escaped and the
+                            # payload has not ended, so the parse is ambiguous.
+                            backslashes = 0
+                            cursor = payload_end - 1
+                            while cursor >= payload_start and text[cursor] == "\\":
+                                backslashes += 1
+                                cursor -= 1
+                            if backslashes % 2:
+                                ambiguous = True
+                                break
+                            if inner_quote is None:
+                                break
+                        if char_at_end in "'\"" and char_at_end != wrapper_quote:
+                            inner_quote = (
+                                None if inner_quote == char_at_end else char_at_end
+                            )
+                        payload_end += 1
+                    if (
+                        not ambiguous
+                        and payload_end < len(text)
+                        and inner_quote is None
+                        and (
+                            payload_end + 1 == len(text)
+                            or text[payload_end + 1] != "\\"
+                        )
+                    ):
+                        out.append(rewrite(text[payload_start:payload_end]))
+                        index = payload_end + 1
+                        command_position = False
+                        continue
+                    # Ambiguous: hand the text back untouched so the masking path
+                    # decides, rather than unwrapping on a guess.
+                    return text
+
+            if quote is None:
+                if char in "'\"":
+                    quote = char
+                elif char in ";&|\n":
+                    command_position = True
+                elif not char.isspace():
+                    command_position = False
+            elif char == quote and (index == 0 or text[index - 1] != "\\"):
+                quote = None
+
+            out.append(char)
+            index += 1
+
+        return "".join(out)
+
+    return rewrite(command)
+
+
 def normalize_command(command: str) -> str:
-    """Strip sudo/env/bash -c wrappers + collapse whitespace to defeat bypasses."""
+    """Strip command-position wrappers + collapse whitespace to defeat bypasses."""
     if not command or not isinstance(command, str):
         return ""
     cmd = re.sub(r"\s+", " ", command).strip()
+    cmd = unwrap_command_wrappers(cmd)
     while True:
         prev = cmd
         cmd = re.sub(r"^sudo\s+", "", cmd)
@@ -444,7 +557,8 @@ def mask_separator_quotes(command: str) -> str:
     separator and put `diskpart` in command position. Only spans containing a
     separator are blanked, so a quoted root keeps the protection it relies on
     (`rm -rf '/'` must stay blocked) and a wrapper's quoted command is untouched
-    (`bash -c 'rm -rf /'` is unwrapped by normalize_command before this runs).
+    (`bash -c 'rm -rf /'` is unwrapped before this runs only when it is
+    at executable command position; quoted search data remains untouched).
     """
     out: list[str] = []
     index = 0
@@ -465,7 +579,9 @@ def mask_separator_quotes(command: str) -> str:
 
 
 def find_destructive(command: str) -> str | None:
-    for raw in (command, normalize_command(command)):
+    unwrapped = unwrap_command_wrappers(command)
+    normalized = normalize_command(unwrapped)
+    for raw in (unwrapped, normalized):
         if not raw:
             continue
         candidate = mask_separator_quotes(raw)
