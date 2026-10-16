@@ -170,7 +170,7 @@ BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("mkfs", re.compile(r"mkfs\.")),
     ("shred", re.compile(r"shred\s+")),
     ("dev_write", re.compile(r">\s*/dev/sd[a-z]")),
-    ("win_del_force", re.compile(r"del\s+/f\s+/s")),
+    ("win_del_force", re.compile(r"(?:^|[;&|]\s*)del\s+/f\s+/s")),
     (
         "win_remove_recursive",
         re.compile(
@@ -250,9 +250,22 @@ BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     # its own constant and fire hardcoded_tmp_directory.
     ("rm_temp_linux", re.compile(rf"{_RM_CMD}{_RM_FLAGS}/tmp/")),  # noqa: S108
     ("rm_temp_win", re.compile(rf"{_RM_CMD}{_RM_FLAGS}\$?(?:env:)?TEMP\b", re.I)),
-    ("del_temp_win", re.compile(r"del\s+(?:/f\s+)?/[qs]\s+\$?(?:env:)?TEMP\b", re.I)),
-    ("win_rd_recursive", re.compile(r"(?:rd|rmdir)\s+(?:.*\s)?/s\b", re.I)),
-    ("win_del_any", re.compile(r"del\s+(?:.*\s)?/[qsf]\b", re.I)),
+    # The Windows `del`/`rd` family, anchored to command position like
+    # `diskpart` and `format_disk` (measured 2026-10-16). Unanchored, the
+    # patterns blocked a search, an echo or a commit message that merely
+    # NAMED the invocation -- `rg 'rd /s' .`, `rg 'del /q' .` -- which
+    # teaches people to switch the guard off, the worse failure. The real
+    # invocations still block; `win_del_force` and `del_temp_win` carry the
+    # same defect.
+    (
+        "del_temp_win",
+        re.compile(r"(?:^|[;&|]\s*)del\s+(?:/f\s+)?/[qs]\s+\$?(?:env:)?TEMP\b", re.I),
+    ),
+    (
+        "win_rd_recursive",
+        re.compile(r"(?:^|[;&|]\s*)(?:rd|rmdir)\s+(?:.*\s)?/s\b", re.I),
+    ),
+    ("win_del_any", re.compile(r"(?:^|[;&|]\s*)del\s+(?:.*\s)?/[qsf]\b", re.I)),
     # The Windows-root pair measured open on 2026-10-16 (both engines allowed them).
     ("rm_win_system", re.compile(rf"{_RM_CMD}{_RM_FLAGS}{_WIN_SYSTEM}", re.I)),
     (
@@ -662,11 +675,14 @@ def unwrap_command_wrappers(command: str) -> str:
     stripped the unwrapping from a clean wrapper later on the same line.
 
     "Ambiguous" still means the text is left untouched rather than guessed at.
-    Three shapes are ambiguous: no closing quote for the dialect, a quote the
+    Four shapes are ambiguous: no closing quote for the dialect, a quote the
     payload escaped with a separator before the payload really ends (the two
     readings disagree about whether that separator is executable), and a
     payload whose closing quote is followed by a backslash (the POSIX `'\\''`
-    concatenation, which the masking path has to see whole).
+    concatenation, which the masking path has to see whole), and a payload
+    whose closing quote comes right after a quote it escaped (the two
+    readings disagree about where the payload ends, which shifts every
+    later span).
     """
     if not command:
         return ""
@@ -703,7 +719,22 @@ def unwrap_command_wrappers(command: str) -> str:
                                 payload_end + 1 < len(text)
                                 and text[payload_end + 1] == "\\"
                             )
-                            if not escaped_separator and not trailing_escape:
+                            # An escaped quote the payload closes right after
+                            # is the third disagreement about where the
+                            # payload ends: read as an escape the payload
+                            # runs on, read as the delimiter it ends at the
+                            # escaped quote. Leave the text alone so the raw
+                            # pair decides -- `bash -c "echo \""; rg
+                            # "echo; rm -rf /" .` prints a quote and
+                            # searches, it does not wipe.
+                            escaped_closes_payload = (
+                                escaped_at >= 0 and payload_end == escaped_at + 1
+                            )
+                            if (
+                                not escaped_separator
+                                and not trailing_escape
+                                and not escaped_closes_payload
+                            ):
                                 body = unescape_payload(
                                     text[payload_start:payload_end],
                                     escape,
@@ -814,6 +845,14 @@ def mask_separator_quotes(command: str) -> str:
     (`rm -rf '/'` must stay blocked) and a wrapper's quoted command is untouched
     (`bash -c 'rm -rf /'` is unwrapped before this runs only when it is
     at executable command position; quoted search data remains untouched).
+
+    The pairing is escape-aware: a quote behind an odd backslash run is content,
+    not the span's end, when the quote that really closes the span follows it
+    (`\""`). Reading the escaped quote as the end shifted the spans, and made
+    `bash -c "echo \""; rg "echo; rm -rf /" .` -- where bash prints a quote and
+    then searches -- block on the search data. An escaped quote NOT followed by
+    its own quote is still the end, the reading the round-9 pin relies on to
+    expose its wipe.
     """
     out: list[str] = []
     index = 0
@@ -823,8 +862,23 @@ def mask_separator_quotes(command: str) -> str:
             out.append(char)
             index += 1
             continue
-        end = command.find(char, index + 1)
-        if end == -1:
+        end = index + 1
+        while end < len(command):
+            if command[end] != char:
+                end += 1
+                continue
+            run = 0
+            cursor = end - 1
+            while cursor >= 0 and command[cursor] == "\\":
+                run += 1
+                cursor -= 1
+            if run % 2 == 0:
+                break
+            if end + 1 < len(command) and command[end + 1] == char:
+                end += 1
+                continue
+            break
+        if end >= len(command):
             out.append(command[index:])
             break
         span = command[index : end + 1]

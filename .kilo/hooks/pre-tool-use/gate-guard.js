@@ -80,7 +80,7 @@ const BLOCK_PATTERNS = [
   { name: 'rm_system_dir', pattern: new RegExp(RM_CMD + RM_FLAGS + ROOT_PATH + '(?:etc|usr|var|bin|lib(?:64)?|boot|sbin|opt|root|sys|proc|dev)(?:/|\\s|$|"|\'|;|&|\\|)') },
   { name: 'rm_temp_linux', pattern: new RegExp(RM_CMD + RM_FLAGS + '/tmp/') },
   { name: 'rm_temp_win', pattern: new RegExp(RM_CMD + RM_FLAGS + '\\$?(?:env:)?TEMP\\b', 'i') },
-  { name: 'del_temp_win', pattern: /del\s+(?:\/f\s+)?\/[qs]\s+\$?(?:env:)?TEMP\b/i },
+  { name: 'del_temp_win', pattern: /(?:^|[;&|]\s*)del\s+(?:\/f\s+)?\/[qs]\s+\$?(?:env:)?TEMP\b/i },
   // Windows spellings of the Unix system trees TARGET_PATH carries. Measured open
   // on 2026-10-16 in both engines: `rm -rf C:/Windows`, `Remove-Item -Recurse C:\`.
   // A plain directory stays allowed; only a drive root or a system tree matches.
@@ -132,9 +132,9 @@ const BLOCK_PATTERNS = [
   // legitimate shape.
   { name: 'powershell_download_pipe_iex', pattern: /(?:^|[;&|]\s*)(?:irm|iwr|Invoke-WebRequest|Invoke-RestMethod)\b[^|&;\n]*\|\s*(?:iex|Invoke-Expression)\b/i },
   { name: 'chmod_chown_system', pattern: /(?:chmod|chown)\s+-R\s+(?:[^\/\s]+\s+)*\/(?:etc|usr|var|bin|lib(?:64)?|boot|sbin|opt|root|sys|proc|dev)(?:\/|\s|$)/ },
-  { name: 'win_del_force', pattern: /del\s+\/f\s+\/s/ },
-  { name: 'win_rd_recursive', pattern: /(?:rd|rmdir)\s+(?:.*\s)?\/s\b/i },
-  { name: 'win_del_any', pattern: /del\s+(?:.*\s)?\/[qsf]\b/i },
+  { name: 'win_del_force', pattern: /(?:^|[;&|]\s*)del\s+\/f\s+\/s/ },
+  { name: 'win_rd_recursive', pattern: /(?:^|[;&|]\s*)(?:rd|rmdir)\s+(?:.*\s)?\/s\b/i },
+  { name: 'win_del_any', pattern: /(?:^|[;&|]\s*)del\s+(?:.*\s)?\/[qsf]\b/i },
   { name: 'win_remove_recursive', pattern: new RegExp(PS_CMD + 'Remove-Item\\b[^|;&\\n]*-Recurse\\b[^|;&\\n]*-Force\\b', 'i') },
   { name: 'win_format_volume', pattern: /(?:^|[;&|]\s*)Format-Volume\b/i },
   { name: 'win_stop_computer', pattern: /(?:^|[;&|]\s*)Stop-Computer\b/i },
@@ -426,7 +426,15 @@ function unwrapCommandWrappers(command) {
               // sees, so do not read it.
               const trailingEscape =
                 payloadEnd + 1 < text.length && text[payloadEnd + 1] === '\\';
-              if (!escapedSeparator && !trailingEscape) {
+              // An escaped quote the payload closes right after is the third
+              // disagreement about where the payload ends: read as an escape
+              // the payload runs on, read as the delimiter it ends at the
+              // escaped quote. Leave the text alone so the raw pair decides --
+              // `bash -c "echo \""; rg "echo; rm -rf /" .` prints a
+              // quote and searches, it does not wipe.
+            const escapedClosesPayload =
+              escapedAt >= 0 && payloadEnd === escapedAt + 1;
+            if (!escapedSeparator && !trailingEscape && !escapedClosesPayload) {
                 let body = unescapePayload(
                   text.slice(payloadStart, payloadEnd),
                   dialect.escape,
@@ -555,8 +563,26 @@ function maskSeparatorQuotes(command) {
       index += 1;
       continue;
     }
-    const end = command.indexOf(char, index + 1);
-    if (end === -1) {
+    let end = index + 1;
+    while (end < command.length) {
+      if (command[end] !== char) {
+        end += 1;
+        continue;
+      }
+      let run = 0;
+      let cursor = end - 1;
+      while (cursor >= 0 && command[cursor] === '\\') {
+        run += 1;
+        cursor -= 1;
+      }
+      if (run % 2 === 0) break;
+      if (end + 1 < command.length && command[end + 1] === char) {
+        end += 1;
+        continue;
+      }
+      break;
+    }
+    if (end >= command.length) {
       out += command.slice(index);
       break;
     }

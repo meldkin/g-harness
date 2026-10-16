@@ -251,6 +251,11 @@ BLOCKED_COMMANDS = [
     "eval rm -rf /",
     "echo rm -rf / | bash",
     "echo 'rm -rf /' | /bin/bash",
+    # Round-12: the real Windows delete invocations -- the BLOCK side of the
+    # anchoring fix. Every naming form of the same text stays ALLOWED (below).
+    "rd /s /q C:\\data",
+    "rmdir /s /q C:\\data",
+    "del /f /s C:\\data\\*",
 ]
 
 
@@ -420,6 +425,18 @@ SAFE_COMMANDS = [
     'rg "eval rm -rf /" .',
     'rg "echo rm -rf / | bash" .',
     """rg "echo 'rm -rf /' | /bin/bash" .""",
+    # Round-12: commands that merely NAME a Windows delete invocation are data,
+    # not command position. The rd/rmdir/del family was unanchored the way
+    # `format` once was, so a search or a commit message that quoted it blocked.
+    "rg 'rd /s' .",
+    'git commit -m "explain rd /s /q cleanup"',
+    'echo "rd /s"',
+    "rg 'del /s /q' docs/",
+    "rg 'del /q' .",
+    # ...and the contrived shape after an unwrapped unclosed quote: real bash
+    # prints a quote and runs an ordinary search, so the wipe NAMED inside the
+    # search pattern is data, not a command.
+    'bash -c "echo \\""; rg "echo; rm -rf /" .',
 ]
 
 

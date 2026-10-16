@@ -341,6 +341,47 @@ def test_unquoted_eval_and_pipelined_shells():
     assert guard.find_destructive("""rg "echo 'rm -rf /' | /bin/bash" .""") is None
 
 
+def test_mask_pairs_quotes_escape_aware():
+    r"""Round-12: an escaped quote closed by the span's own end is content.
+
+    `bash -c "echo \""; rg "echo; rm -rf /" .` is the shape: the wrapper's
+    payload is `echo "` (bash prints a quote) and the search that follows names
+    the wipe inside its pattern, so nothing destructive runs. The pairing read
+    the escaped `\"` as the span's end, which shifted the spans and exposed the
+    search data as a command. A quote behind an odd backslash run is no longer
+    the span's end -- but only when the quote that really closes the span
+    follows it (`\""`). On its own such a quote is still the end, which the
+    round-9 pin below relies on to expose its wipe.
+    """
+    # The escaped quote followed by its closing quote: both are content, so the
+    # search pattern holding the separator is blanked and the command allows.
+    assert (
+        guard.mask_separator_quotes(r"""bash -c "echo \""; rg "echo; rm -rf /" .""")
+        == r"""bash -c "echo \""; rg '' ."""
+    )
+    # The payload closes right after the escaped quote, so the payload-end walk
+    # cannot say where it really ends and the wrapper is left verbatim; the raw
+    # text is then read and the search stays data.
+    assert (
+        guard.unwrap_command_wrappers(r"""bash -c "echo \""; rg "echo; rm -rf /" .""")
+        == r"""bash -c "echo \""; rg "echo; rm -rf /" ."""
+    )
+    assert (
+        guard.find_destructive(r"""bash -c "echo \""; rg "echo; rm -rf /" .""") is None
+    )
+    # An escaped quote NOT followed by its own quote is still the span's end --
+    # the reading the round-9 pin depends on. Its wipe is exposed and stays
+    # blocked, so being escape-aware must not go further than this.
+    assert (
+        guard.mask_separator_quotes(r'''bash -c "echo C:\"; rm -rf / && echo "done"''')
+        == r'''bash -c "echo C:\"; rm -rf / && echo "done"'''
+    )
+    assert (
+        guard.find_destructive(r'''bash -c "echo C:\"; rm -rf / && echo "done"''')
+        is not None
+    )
+
+
 def run_self_test():
     """Run basic validation tests."""
     print("Guard hook self-test...")
@@ -362,6 +403,7 @@ def run_self_test():
             "Unquoted eval and piped shells",
             test_unquoted_eval_and_pipelined_shells,
         ),
+        ("Escape-aware masking", test_mask_pairs_quotes_escape_aware),
     ]
 
     passed = 0
