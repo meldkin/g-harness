@@ -194,8 +194,21 @@ def _guard_flags(text: str) -> str | None:
         return None
 
 
+def _wsl_path(win_path: Path) -> str:
+    """Translate a Windows path to its WSL mount path (F:\\x -> /mnt/f/x)."""
+    text = str(win_path).replace("\\", "/")
+    if len(text) > 2 and text[1] == ":":
+        return f"/mnt/{text[0].lower()}{text[2:]}"
+    return text
+
+
 def run_tool(
-    name: str, args: dict, *, allow_dirs: list[Path], allow_programs: set[str]
+    name: str,
+    args: dict,
+    *,
+    allow_dirs: list[Path],
+    allow_programs: set[str],
+    sandbox: str = "",
 ) -> str:
     """Execute one tool call inside its fence. Returns the text fed back to the model."""
     if name == "read_file":
@@ -238,13 +251,36 @@ def run_tool(
         flagged = _guard_flags(" ".join(argv))
         if flagged:
             return f"refused: the guard flags this command ({flagged})"
+        if sandbox == "wsl":
+            # Inside WSL the interpreter is `python3`, and the fence is what contains the command:
+            # namespaces with only the workspace writable and networking untouched (see
+            # tools/wsl_sandbox.sh). The guard veto above still applies first.
+            if argv[0] == "python":
+                argv = ["python3", *argv[1:]]
+            argv = [
+                "wsl",
+                "-e",
+                "unshare",
+                "--user",
+                "--map-root-user",
+                "--mount",
+                "--pid",
+                "--fork",
+                "--",
+                "sh",
+                _wsl_path(ROOT / "tools" / "wsl_sandbox.sh"),
+                _wsl_path(ROOT),
+                ".",
+                "--",
+                *argv,
+            ]
         try:
             proc = subprocess.run(  # noqa: S603 - pinned argv, no shell, allowlisted program
                 argv,
                 cwd=ROOT,
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=900 if sandbox == "wsl" else 300,
                 check=False,
             )
         except subprocess.TimeoutExpired:
@@ -285,6 +321,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--tools", default="", help="comma list of read,write,command (default: none)"
+    )
+    parser.add_argument(
+        "--sandbox",
+        choices=("", "wsl"),
+        default="",
+        help="run run_command inside a namespace fence in WSL (needs WSL; keeps TLS working)",
     )
     parser.add_argument(
         "--allow-dir",
@@ -388,7 +430,11 @@ def main(argv: list[str] | None = None) -> int:
             except json.JSONDecodeError:
                 call_args = {}
             result = run_tool(
-                name, call_args, allow_dirs=allow_dirs, allow_programs=allow_programs
+                name,
+                call_args,
+                allow_dirs=allow_dirs,
+                allow_programs=allow_programs,
+                sandbox=args.sandbox,
             )
             print(
                 f"[model_api] tool {name}({json.dumps(call_args)[:90]}) -> {result.splitlines()[0][:90] if result else ''}",
@@ -412,6 +458,7 @@ def main(argv: list[str] | None = None) -> int:
             "prompt_chars": len(prompt),
             "includes": args.include,
             "tools": sorted(enabled),
+            "sandbox": args.sandbox or None,
             "steps": steps,
             "elapsed_s": round(elapsed, 2),
             "prompt_tokens": usage_total["prompt_tokens"],
