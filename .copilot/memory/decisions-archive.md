@@ -1089,6 +1089,19 @@ meant nothing of the project's own code could be swept in either way. And the op
 stands: a deploy replacing a project's `.gitignore` loses rules it cannot know about, so that file
 should be merged (or written only when absent, like the memory templates) rather than overwritten.
 
+That question is now closed in code: `.gitignore` is merged, never replaced. The project's file is
+kept as it is and only the harness rules it lacks are appended, under a marker line, so a project
+keeps every rule it wrote while `.env`, `.solocode/` and the cache directories are guaranteed to be
+ignored. A target with no `.gitignore` still receives the harness file verbatim, a second deploy
+finds nothing missing and writes nothing, and the appended block matches the file's own line endings
+(CRLF stays CRLF). Four tests pin the behaviour, and one of them caught a real bug in the first
+implementation: `Path.read_text()` normalises newlines, so the CRLF detection always chose LF and the
+append would have rewritten the ending of every line in the file. The remaining gap is the other
+structured root files a project may also own - `pyproject.toml`, `.ruff.toml`, `eslint.config.js`,
+`.pre-commit-config.yaml`, `Makefile` - which are still replaced wholesale, because a TOML file or a
+set of Make targets is not a line set; they are named in `MERGE_ROOT_FILES`' comment for whoever
+takes that on.
+
 ### 2026-10-16 - Consolidating on one GitHub repo, and what a force-push does and does not keep
 
 The owner's goal is a single canonical repo. The measurements that decided where it should live:

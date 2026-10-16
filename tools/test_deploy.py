@@ -671,3 +671,78 @@ def test_upgrade_note_is_silent_for_a_fresh_target(tmp_path: Path) -> None:
     )
 
     assert "from an earlier harness" not in result.stdout
+
+
+# --- the deploy must not replace a project's .gitignore (measured on a real upgrade) ------------
+
+
+def test_deploy_keeps_a_projects_own_gitignore_rules(tmp_path: Path) -> None:
+    """A target's own .gitignore rules survive, and the harness rules are guaranteed present.
+
+    The first live upgrade dropped five rules a project had written (*.log, logs/, one of its own
+    source paths, *.exe, .kilo/worktrees/) because .gitignore is in ROOT_FILES and was copied over.
+    A deploy cannot know which of a project's rules matter, so it now keeps the file and appends
+    only what is missing.
+    """
+    proj = tmp_path / "has-gitignore"
+    proj.mkdir()
+    _write(
+        proj / ".gitignore", "# project rules\nsource_code/only/here/\n*.log\n.venv/\n"
+    )
+
+    rc = deploy.deploy(str(proj), dry_run=False, assume_yes=True)
+    assert rc == 0
+
+    merged = (proj / ".gitignore").read_text(encoding="utf-8")
+    assert "source_code/only/here/" in merged, "the project's own rule was dropped"
+    assert "*.log" in merged
+    assert "*.venv" not in merged
+    # rules the harness depends on are now present even though the project never wrote them
+    assert ".env" in merged
+    assert ".solocode/" in merged
+    assert "__pycache__/" in merged
+    # and nothing was duplicated
+    lines = [ln for ln in merged.splitlines() if ln.strip()]
+    assert len(lines) == len(set(lines)), "the merge duplicated a rule"
+
+
+def test_gitignore_merge_is_idempotent(tmp_path: Path) -> None:
+    """A second deploy has nothing to add, so the file does not grow."""
+    proj = tmp_path / "idempotent"
+    proj.mkdir()
+    _write(proj / ".gitignore", "my-own-rule/\n")
+
+    assert deploy.deploy(str(proj), dry_run=False, assume_yes=True) == 0
+    first = (proj / ".gitignore").read_bytes()
+    assert deploy.deploy(str(proj), dry_run=False, assume_yes=True) == 0
+    second = (proj / ".gitignore").read_bytes()
+
+    assert first == second, "the second deploy changed .gitignore again"
+    assert first.decode("utf-8").count("added by the Solo-Code Harness deploy") == 1
+
+
+def test_fresh_target_gets_the_harness_gitignore_unchanged(tmp_path: Path) -> None:
+    """No existing file means the harness version is written verbatim."""
+    proj = tmp_path / "fresh"
+    proj.mkdir()
+
+    assert deploy.deploy(str(proj), dry_run=False, assume_yes=True) == 0
+
+    assert (proj / ".gitignore").read_bytes() == (ROOT / ".gitignore").read_bytes()
+
+
+def test_gitignore_merge_matches_the_files_line_endings(tmp_path: Path) -> None:
+    """A CRLF file keeps CRLF in the appended block, so git does not see the whole file change."""
+    proj = tmp_path / "crlf"
+    proj.mkdir()
+    (proj / ".gitignore").write_bytes(b"project-rule/\r\n")
+
+    status = deploy._merge_list_file(
+        ROOT / ".gitignore", proj / ".gitignore", dry_run=False, base=proj
+    )
+
+    assert "[MRG]" in status
+    data = (proj / ".gitignore").read_bytes()
+    appended = data[len(b"project-rule/\r\n") :]
+    assert b"\r\n" in appended, "appended lines did not use the file's CRLF ending"
+    assert b"\n" in appended
