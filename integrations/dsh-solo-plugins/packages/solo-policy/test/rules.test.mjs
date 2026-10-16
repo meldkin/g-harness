@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { DESTRUCTIVE_PATTERNS, classifyCommand, classifyTool, redactSecrets } from '../src/rules.js'
+import { DESTRUCTIVE_PATTERNS, SECRET_PATTERNS, classifyCommand, classifyTool, redactSecrets } from '../src/rules.js'
 
 test('allows non-mutating shell work', () => {
   assert.deepEqual(classifyCommand('git status'), { action: 'allow' })
@@ -80,4 +80,60 @@ test('each sample is refused by the pattern it belongs to', () => {
     assert.equal(decision.action, 'ask', `${id}: ${command} should require approval`)
     assert.match(decision.reason ?? '', new RegExp(`\\(${id}\\)`), `${id} did not match its own pattern`)
   }
+})
+
+// One sample per secret shape. Values are assembled from fragments so this file
+// never contains a literal that a secret scanner would flag.
+const fake = (...parts) => parts.join('')
+const hex32 = 'a1b2c3d4'.repeat(4)
+const SECRET_SAMPLES = {
+  aws_access_key: fake('AKIA', 'A'.repeat(16)),
+  google_api_key: fake('AIza', 'b'.repeat(35)),
+  anthropic_key: fake('sk-ant-', 'c'.repeat(24)),
+  openai_project_key: fake('sk-proj-', 'd'.repeat(20)),
+  openai_legacy_key: fake('sk-', 'e'.repeat(24)),
+  stripe_key: fake('sk_live_', 'f'.repeat(24)),
+  npm_token: fake('npm_', 'g'.repeat(36)),
+  gitlab_pat: fake('glpat-', 'h'.repeat(20)),
+  digitalocean_token: fake('dop_v1_', 'i'.repeat(64)),
+  github_token: fake('ghp_', 'j'.repeat(20)),
+  slack_token: fake('xoxb-', '1'.repeat(12)),
+  jwt_token: fake('eyJhbGciOiJIUzI1NiJ9', '.', 'eyJzdWIiOiIxMjM0NTY3ODkwI', '.', 'k'.repeat(24)),
+  private_key_pem: fake('-----BEGIN ', 'RSA ', 'PRIVATE KEY-----'),
+  discord_webhook: fake('https://discord.com/api/webhooks/', '123456789', '/', 'l'.repeat(20)),
+  bearer_header: fake('Bearer ', 'm'.repeat(24)),
+  basic_auth: fake('https://alice:', 'n'.repeat(12), '@example.com/path'),
+  mongodb_uri: fake('mongodb+srv://bob:', 'o'.repeat(12), '@cluster.example.net/db'),
+  postgres_uri: fake('postgres://carol:', 'p'.repeat(12), '@db.example.net:5432/app'),
+  redis_uri: fake('redis://dave:', 'q'.repeat(12), '@cache.example.net:6379'),
+  aws_secret_key: fake('aws_secret_', 'key="', 'r'.repeat(24), '"'),
+  generic_api_key: fake('api_', 'key="', 's'.repeat(12), '"'),
+  hardcoded_token: fake('tok', 'en="', 't'.repeat(24), '"'),
+  env_assignment_secret: fake('pass', 'word=', 'u'.repeat(20)),
+}
+
+test('every secret pattern has exactly one sample', () => {
+  const declared = SECRET_PATTERNS.map((pattern) => pattern.id).sort()
+  const sampled = Object.keys(SECRET_SAMPLES).sort()
+  assert.deepEqual(sampled, declared, 'add a sample for each new secret shape (and vice versa)')
+})
+
+test('every secret sample is redacted', () => {
+  for (const [id, secret] of Object.entries(SECRET_SAMPLES)) {
+    const redacted = redactSecrets(`prefix ${secret} suffix`)
+    assert.ok(redacted.includes('[REDACTED]'), `${id}: nothing was redacted`)
+    assert.ok(!redacted.includes(secret), `${id}: the value survived redaction`)
+  }
+})
+
+test('an assignment keeps the key name so the audit says what leaked', () => {
+  const redacted = redactSecrets(`aws_secret_key="${'r'.repeat(24)}"`)
+  assert.ok(redacted.startsWith('aws_secret_key="'), `expected the key name to survive, got ${redacted}`)
+})
+
+test('an SQL connection URI keeps its host and loses only the userinfo', () => {
+  const uri = fake('postgres://carol:', 'p'.repeat(12), '@db.example.net:5432/app')
+  const redacted = redactSecrets(uri)
+  assert.ok(redacted.includes('db.example.net:5432/app'), `host was lost: ${redacted}`)
+  assert.ok(!redacted.includes('p'.repeat(12)), 'the password survived')
 })

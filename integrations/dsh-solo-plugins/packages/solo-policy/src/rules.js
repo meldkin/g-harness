@@ -64,6 +64,40 @@ export const DESTRUCTIVE_PATTERNS = Object.freeze([
 ])
 
 /**
+ * Secret shapes the redactor must recognise, ids taken verbatim from the harness
+ * guard's list so a diff between the two is mechanical. Token shapes replace the
+ * whole match; assignment shapes keep the key name (via `$1`) because an audit
+ * record is more useful when it says which secret leaked. URL shapes keep the
+ * scheme and host and drop only the userinfo.
+ * @type {ReadonlyArray<{id: string, re: RegExp, replacement?: string | ((match: string) => string)}>}
+ */
+export const SECRET_PATTERNS = Object.freeze([
+  { id: 'aws_access_key', re: /(?:AKIA|ASIA)[A-Z0-9]{16}/g },
+  { id: 'google_api_key', re: /AIza[0-9A-Za-z_-]{35}/g },
+  { id: 'anthropic_key', re: /sk-ant-[A-Za-z0-9\-_]{24,}/g },
+  { id: 'openai_project_key', re: /sk-proj-[A-Za-z0-9\-_]{20,}/g },
+  { id: 'openai_legacy_key', re: /sk-[A-Za-z0-9]{20,}/g },
+  { id: 'stripe_key', re: /(?:sk|pk)_(?:test|live)_[0-9a-zA-Z]{24,}/g },
+  { id: 'npm_token', re: /npm_[A-Za-z0-9]{36}/g },
+  { id: 'gitlab_pat', re: /glpat-[A-Za-z0-9\-_]{20,}/g },
+  { id: 'digitalocean_token', re: /dop_v1_[A-Za-z0-9]{64}/g },
+  { id: 'github_token', re: /(?:gh[pousr]_|github[_-]?pat[_-]?|github[_-]?token[_-]?)[A-Za-z0-9_]{20,}/gi },
+  { id: 'slack_token', re: /xox[baprs]-[0-9A-Za-z-]{10,}/g },
+  { id: 'jwt_token', re: /eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
+  { id: 'private_key_pem', re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g },
+  { id: 'discord_webhook', re: /https:\/\/discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-Za-z0-9_-]+/gi },
+  { id: 'bearer_header', re: /Bearer\s+[A-Za-z0-9._\-+/=]{20,}/gi },
+  { id: 'basic_auth', re: /https?:\/\/[^:@/\s]+:[^@/\s]+@/gi, replacement: (match) => match.replace(/\/\/.*@/, '//[REDACTED]@') },
+  { id: 'mongodb_uri', re: /mongodb(?:\+srv)?:\/\/[^:@/\s]+:[^@/\s]+@/gi, replacement: (match) => match.replace(/\/\/.*@/, '//[REDACTED]@') },
+  { id: 'postgres_uri', re: /postgres(?:ql)?:\/\/[^:@/\s]+:[^@/\s]+@/gi, replacement: (match) => match.replace(/\/\/.*@/, '//[REDACTED]@') },
+  { id: 'redis_uri', re: /redis:\/\/[^:@/\s]+:[^@/\s]+@/gi, replacement: (match) => match.replace(/\/\/.*@/, '//[REDACTED]@') },
+  { id: 'aws_secret_key', re: /((?:aws|amazon).{0,20}(?:secret|key|token).{0,10}[:=]\s*["'])[A-Za-z0-9/+=]{20,}/gi, replacement: '$1[REDACTED]' },
+  { id: 'generic_api_key', re: /((?:api[_-]?key|apikey|secret|password)\s*[:=]\s*["'])(?!\$)[^"']{8,}/gi, replacement: '$1[REDACTED]' },
+  { id: 'hardcoded_token', re: /((?:token|bearer)\s*[:=]\s*["'])[A-Za-z0-9._\-+/=]{20,}/gi, replacement: '$1[REDACTED]' },
+  { id: 'env_assignment_secret', re: /((?:api[_-]?key|secret|token|password|passwd|credential)[a-z_-]*\s*[:=]\s*)(?![^\s"']*(?:x{3}|\*{3}))[^\s"'$][^\s"']{15,}/gi, replacement: '$1[REDACTED]' },
+])
+
+/**
  * Return a deterministic decision for a shell command under the balanced
  * preset. The caller can make the final approval decision through DSH's
  * approval seam.
@@ -103,5 +137,13 @@ export function classifyTool(name, args) {
 
 /** Replace likely credential values before they are placed in an audit record. */
 export function redactSecrets(text) {
-  return text.replace(SECRET_ASSIGNMENT, '$1[REDACTED]')
+  let redacted = text
+  for (const pattern of SECRET_PATTERNS) {
+    // String.prototype.replace takes a string (with $1) or a function, so the
+    // per-pattern replacement needs no branching here.
+    redacted = redacted.replace(pattern.re, pattern.replacement ?? '[REDACTED]')
+  }
+  // The legacy assignment rule stays last: it is the broadest of the family and
+  // catches short values the specific patterns above deliberately ignore.
+  return redacted.replace(SECRET_ASSIGNMENT, '$1[REDACTED]')
 }
