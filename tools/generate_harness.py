@@ -38,7 +38,9 @@ from pathlib import Path
 
 TOOLS_DIR = Path(__file__).resolve().parent
 ROOT_DIR = TOOLS_DIR.parent
-SKIP_FILE = TOOLS_DIR / "opencode-skip-skills.txt"  # legacy name, still the skill skip-list
+SKIP_FILE = (
+    TOOLS_DIR / "opencode-skip-skills.txt"
+)  # legacy name, still the skill skip-list
 KILO_DIR = ROOT_DIR / ".kilo"
 CLAUDE_DIR = ROOT_DIR / ".claude"
 
@@ -48,6 +50,7 @@ def _load_claude_engine():
     if str(TOOLS_DIR) not in sys.path:
         sys.path.insert(0, str(TOOLS_DIR))
     import claude_engine
+
     return claude_engine
 
 
@@ -56,6 +59,7 @@ def _load_opencode_engine():
     if str(TOOLS_DIR) not in sys.path:
         sys.path.insert(0, str(TOOLS_DIR))
     import opencode_engine
+
     return opencode_engine
 
 
@@ -65,7 +69,11 @@ def load_skip_list(skip_file: Path) -> set[str]:
         print(f"[WARN] Skip file not found: {skip_file}")
         print("[WARN]  -> All skills will be copied.")
         return set()
-    names = {line.strip() for line in skip_file.read_text(encoding="utf-8").splitlines() if line.strip()}
+    names = {
+        line.strip()
+        for line in skip_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
     print(f"[INFO] Loaded {len(names)} skip entries from {skip_file.name}")
     for n in sorted(names):
         print(f"       - {n}")
@@ -81,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["all", "claude", "opencode"],
         default="all",
         help="Which engine to generate. 'all' emits claude + opencode + the "
-             ".copilot/.gemini instruction and skill body mirrors.",
+        ".copilot/.gemini instruction and skill body mirrors.",
     )
     parser.add_argument(
         "--include-all",
@@ -119,7 +127,10 @@ def _sync_mirror_dir(src_dir: Path, mirrors: list[Path], root: Path) -> int:
             src_text = src.read_text(encoding="utf-8")
             if dst.read_text(encoding="utf-8") == src_text:
                 continue
-            dst.write_text(src_text, encoding="utf-8")
+            # newline="\n": .gitattributes requires eol=lf, but Python's default
+            # newline translation writes CRLF on Windows and leaves the generated
+            # mirror dirty until Git renormalises it.
+            dst.write_text(src_text, encoding="utf-8", newline="\n")
             print(f"  [SYNC] {label}/{src.name}")
             synced += 1
     return synced
@@ -203,7 +214,7 @@ def sync_skill_body_mirrors(kilo_root: Path, root: Path) -> int:
                 continue
 
             new_text = dst_fm + src_body
-            dst_skill_md.write_text(new_text, encoding="utf-8")
+            dst_skill_md.write_text(new_text, encoding="utf-8", newline="\n")
             print(f"  [SYNC] {label}/{skill_dir.name}/SKILL.md (body)")
             synced += 1
 

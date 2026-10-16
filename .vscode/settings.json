@@ -235,6 +235,176 @@
       "apiKey": "${COMMANDCODE_API_KEY}",
       "baseUrl": "${COMMANDCODE_BASE_URL}",
       "version": "xiaomi/mimo-v2.5-pro"
+    },
+    {
+      "name": "DeepSeek V4.1 Flash (official)",
+      "description": "DeepSeek V4.1 Flash via the direct DeepSeek API (id: deepseek-flash, 1M context)",
+      "vendor": "deepseek",
+      "family": "deepseek",
+      "model": "deepseek-flash",
+      "apiKey": "${DEEPSEEK_API_KEY}",
+      "baseUrl": "${DEEPSEEK_BASE_URL}",
+      "version": "deepseek-flash"
+    },
+    {
+      "name": "DeepSeek V4.1 Flash (OpenRouter)",
+      "description": "DeepSeek V4.1 Flash via OpenRouter — 1.05M context",
+      "vendor": "openrouter",
+      "family": "deepseek",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "apiKey": "${OPENROUTER_API_KEY}",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "version": "deepseek/deepseek-v4.1-flash"
+    },
+    {
+      "name": "DeepSeek V4 Pro (OpenRouter)",
+      "description": "DeepSeek V4 Pro via OpenRouter — 1.05M context",
+      "vendor": "openrouter",
+      "family": "deepseek",
+      "model": "deepseek/deepseek-v4-pro",
+      "apiKey": "${OPENROUTER_API_KEY}",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "version": "deepseek/deepseek-v4-pro"
+    },
+    {
+      "name": "DeepSeek V4.1 Flash Fast (via CC)",
+      "description": "DeepSeek V4.1 Flash Fast via CommandCode — ~250-300 TPS, 1M context",
+      "vendor": "commandcode",
+      "family": "deepseek",
+      "model": "deepseek/deepseek-v4.1-flash-fast",
+      "apiKey": "${COMMANDCODE_API_KEY}",
+      "baseUrl": "${COMMANDCODE_BASE_URL}",
+      "version": "deepseek/deepseek-v4.1-flash-fast"
+    },
+    {
+      "name": "Claude Sonnet 5.5 (via CC)",
+      "description": "Anthropic Claude Sonnet 5.5 — 30% faster and 30% cheaper",
+      "vendor": "commandcode",
+      "family": "claude",
+      "model": "claude-sonnet-5-5",
+      "apiKey": "${COMMANDCODE_API_KEY}",
+      "baseUrl": "${COMMANDCODE_BASE_URL}",
+      "version": "claude-sonnet-5-5"
+    },
+    {
+      "name": "Claude Opus 5.5 (via CC)",
+      "description": "Anthropic Claude Opus 5.5 — latest flagship, deep reasoning",
+      "vendor": "commandcode",
+      "family": "claude",
+      "model": "claude-opus-5-5",
+      "apiKey": "${COMMANDCODE_API_KEY}",
+      "baseUrl": "${COMMANDCODE_BASE_URL}",
+      "version": "claude-opus-5-5"
+    },
+    {
+      "name": "GLM-5.3 FlashX (via CC)",
+      "description": "Zhipu GLM-5.3 FlashX — ~200 TPS, 1M context, multimodal",
+      "vendor": "commandcode",
+      "family": "glm",
+      "model": "z-ai/glm-5.3-flashx",
+      "apiKey": "${COMMANDCODE_API_KEY}",
+      "baseUrl": "${COMMANDCODE_BASE_URL}",
+      "version": "z-ai/glm-5.3-flashx"
+    },
+    {
+      "name": "Muse Spark 1.3 (via CC)",
+      "description": "Meta Muse Spark 1.3 — max reasoning effort for harder problems",
+      "vendor": "commandcode",
+      "family": "muse",
+      "model": "meta/muse-spark-1.3",
+      "apiKey": "${COMMANDCODE_API_KEY}",
+      "baseUrl": "${COMMANDCODE_BASE_URL}",
+      "version": "meta/muse-spark-1.3"
+    },
+    {
+      "name": "GPT-6.1 Sol (via CC)",
+      "description": "OpenAI GPT-6.1 Sol — latest flagship, 1.05M context",
+      "vendor": "commandcode",
+      "family": "gpt",
+      "model": "gpt-6.1-sol",
+      "apiKey": "${COMMANDCODE_API_KEY}",
+      "baseUrl": "${COMMANDCODE_BASE_URL}",
+      "version": "gpt-6.1-sol"
+    },
+    {
+      "name": "GPT-6 Sol (via CC)",
+      "description": "OpenAI GPT-6 Sol — flagship, 1.05M context",
+      "vendor": "commandcode",
+      "family": "gpt",
+      "model": "gpt-6-sol",
+      "apiKey": "${COMMANDCODE_API_KEY}",
+      "baseUrl": "${COMMANDCODE_BASE_URL}",
+      "version": "gpt-6-sol"
+    },
+    {
+      "name": "GPT-6 Luna (via CC)",
+      "description": "OpenAI GPT-6 Luna — general purpose, 1.05M context",
+      "vendor": "commandcode",
+      "family": "gpt",
+      "model": "gpt-6-luna",
+      "apiKey": "${COMMANDCODE_API_KEY}",
+      "baseUrl": "${COMMANDCODE_BASE_URL}",
+      "version": "gpt-6-luna"
+    },
+    {
+      "name": "Ling 3.1 Flash (via CC)",
+      "description": "InclusionAI Ling 3.1 Flash — free, 560B total / 25B active",
+      "vendor": "commandcode",
+      "family": "ling",
+      "model": "inclusionai/ling-3.1-flash:free",
+      "apiKey": "${COMMANDCODE_API_KEY}",
+      "baseUrl": "${COMMANDCODE_BASE_URL}",
+      "version": "inclusionai/ling-3.1-flash:free"
+    },
+    {
+      "name": "MiMo V2.6 Pro (via CC)",
+      "description": "Xiaomi MiMo V2.6 Pro — 1M context, strong generalist",
+      "vendor": "commandcode",
+      "family": "mimo",
+      "model": "xiaomi/mimo-v2.6-pro",
+      "apiKey": "${COMMANDCODE_API_KEY}",
+      "baseUrl": "${COMMANDCODE_BASE_URL}",
+      "version": "xiaomi/mimo-v2.6-pro"
+    },
+    {
+      "name": "MiMo V2.6 Flash (via CC)",
+      "description": "Xiaomi MiMo V2.6 Flash — 1M context, fast",
+      "vendor": "commandcode",
+      "family": "mimo",
+      "model": "xiaomi/mimo-v2.6-flash",
+      "apiKey": "${COMMANDCODE_API_KEY}",
+      "baseUrl": "${COMMANDCODE_BASE_URL}",
+      "version": "xiaomi/mimo-v2.6-flash"
+    },
+    {
+      "name": "Grok 4.7 (via CC)",
+      "description": "xAI Grok 4.7 — 500K context, strong reasoning",
+      "vendor": "commandcode",
+      "family": "grok",
+      "model": "xai/grok-4.7",
+      "apiKey": "${COMMANDCODE_API_KEY}",
+      "baseUrl": "${COMMANDCODE_BASE_URL}",
+      "version": "xai/grok-4.7"
+    },
+    {
+      "name": "Qwen 3.8 Omni Flash (via CC)",
+      "description": "Alibaba Qwen 3.8 Omni Flash — 1M context, multimodal",
+      "vendor": "commandcode",
+      "family": "qwen",
+      "model": "Qwen/Qwen3.8-Omni-Flash",
+      "apiKey": "${COMMANDCODE_API_KEY}",
+      "baseUrl": "${COMMANDCODE_BASE_URL}",
+      "version": "Qwen/Qwen3.8-Omni-Flash"
+    },
+    {
+      "name": "Step 5 Preview (via CC)",
+      "description": "StepFun Step 5 Preview — 1M context, preview",
+      "vendor": "commandcode",
+      "family": "stepfun",
+      "model": "stepfun/Step-5-Preview",
+      "apiKey": "${COMMANDCODE_API_KEY}",
+      "baseUrl": "${COMMANDCODE_BASE_URL}",
+      "version": "stepfun/Step-5-Preview"
     }
   ],
   "chat.utilityModel": "mainAgent",

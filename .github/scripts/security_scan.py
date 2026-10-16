@@ -5,6 +5,13 @@ Security Scanner
 Scans codebase for common security issues: hardcoded secrets,
 unsafe patterns, and misconfigurations.
 
+Secrets are always scanned, in every file. `UNSAFE_PATTERNS` (eval/exec/
+os.system/shell=True/innerHTML) are code constructs: they run only under
+`--strict`, and never against documentation, because instruction and skill docs
+quote those constructs on purpose -- a security skill that never names `eval(`
+teaches nothing. Scanning prose for them produced 68 findings, all false
+positives, which is why the strict half sat unused.
+
 Usage:
     python .github/scripts/security_scan.py <project_path>
     python .github/scripts/security_scan.py . --strict
@@ -53,7 +60,13 @@ SECRET_PATTERNS = [
 UNSAFE_PATTERNS = [
     (r"\.innerHTML\s*=", "Unsafe innerHTML assignment (XSS risk)"),
     (r"eval\(", "Use of eval() — code injection risk"),
-    (r"exec\(", "Use of exec() — code injection risk"),
+    # Only a one-argument (or string-argument) call is the injection risk. Two
+    # shapes are safe and are what this repo actually uses:
+    #   exec('git', ['status'])      -- quoted command + argv array
+    #   exec(cmd, args)              -- the thin spawnSync wrapper's own signature
+    # Without both exclusions, enabling --strict flagged 17 benign hook sites and
+    # was useless as a gate.
+    (r"exec\((?!\s*(?:['\"`][^'\"`]*['\"`]|\w+)\s*,)", "Use of exec() — code injection risk"),
     (r"os\.system\(", "Use of os.system() — command injection risk"),
     (
         r"subprocess\.call\(.*shell\s*=\s*True",
@@ -102,6 +115,10 @@ SKIP_EXTENSIONS = {
     ".pyc",
 }
 
+# Documentation and prose. Secrets are still scanned here; `UNSAFE_PATTERNS` are
+# not, because docs quote code constructs deliberately (see the module docstring).
+DOC_SUFFIXES = {".md", ".mdx", ".rst", ".txt", ".adoc"}
+
 
 def untracked_top_level_dirs(root: Path) -> set[str]:
     """Top-level directories inside `root` containing zero git-tracked files.
@@ -145,7 +162,17 @@ def untracked_top_level_dirs(root: Path) -> set[str]:
 def should_skip(file_path: Path, extra_skip_dirs: frozenset[str] = frozenset()) -> bool:
     # Skip files that intentionally contain mock secrets for testing
     name = file_path.name.lower()
-    if name in {"eval_harness.py", "secret-scan.test.js", "guard.test.js", "test_claude_guard.py", "test_codex_guard.py", "test_secret_patterns.py"}:
+    # Files that contain dangerous-looking literals on purpose: this scanner's
+    # own pattern table, the evaluation harness, and the detectors' own tests.
+    if name in {
+        "eval_harness.py",
+        "guard.test.js",
+        "secret-scan.test.js",
+        "security_scan.py",
+        "test_claude_guard.py",
+        "test_codex_guard.py",
+        "test_secret_patterns.py",
+    }:
         return True
     if name in SKIP_NAMES:
         return True
@@ -163,11 +190,12 @@ def scan_file(file_path: Path, strict: bool) -> list[tuple[str, str, int]]:
     except Exception:
         return findings
 
+    check_unsafe = strict and file_path.suffix.lower() not in DOC_SUFFIXES
     for line_no, line in enumerate(content.splitlines(), 1):
         for pattern, description in SECRET_PATTERNS:
             if re.search(pattern, line, re.IGNORECASE):
                 findings.append((str(file_path), f"SECRET: {description}", line_no))
-        if strict:
+        if check_unsafe:
             for pattern, description in UNSAFE_PATTERNS:
                 if re.search(pattern, line, re.IGNORECASE):
                     findings.append((str(file_path), f"UNSAFE: {description}", line_no))

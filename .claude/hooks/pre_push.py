@@ -51,7 +51,7 @@ GATES: tuple[tuple[list[str], str, str], ...] = (
     (["python", "-m", "pytest", "tools/", "-q"],
      "pytest suite",
      "Fix failing tests"),
-    (["python", ".github/scripts/security_scan.py", "."],
+    (["python", ".github/scripts/security_scan.py", ".", "--strict"],
      "security scan",
      "Review and fix security scan findings"),
 )

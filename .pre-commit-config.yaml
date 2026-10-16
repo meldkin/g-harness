@@ -4,24 +4,39 @@ repos:
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
-        exclude: ^(\.kilo/|\.opencode/|cocoindex-code-main/)
+        # Reference checkouts of upstream projects get unpacked inside the repo
+        # during review. They are never ours to format, and .gitignore does not
+        # cover pre-commit hooks (ruff honours .gitignore; these hooks do not).
+        # One anchor reused below, so adding a checkout is a single edit -- the
+        # hardcoded `cocoindex-code-main/` had gone stale while five other names
+        # sat unprotected.
+        exclude: &vendored_exclude ^(\.kilo/|\.opencode/|(?:agentic-awesome-skills-main|deepseek-harness-master|open-code-review-main|antigravity-sdk-python-main|learn-harness-engineering-main)/)
       - id: check-yaml
         args: [--allow-multiple-documents]
-        exclude: ^cocoindex-code-main/
+        # Deliberately not just *vendored_exclude: the Cordis patches under
+        # integrations/dsh-solo-plugins/profiles/ carry `!!js` tags the DSH kernel
+        # evaluates, which PyYAML cannot construct. Excluding those two files keeps
+        # every other YAML in the tree checked; weakening the hook (or hand-editing
+        # the patches) would hide real YAML breakage instead.
+        exclude: ^(\.kilo/|\.opencode/|(?:agentic-awesome-skills-main|deepseek-harness-master|open-code-review-main|antigravity-sdk-python-main|learn-harness-engineering-main)/|integrations/dsh-solo-plugins/profiles/)
       - id: check-json
-        exclude: ^cocoindex-code-main/
+        exclude: *vendored_exclude
       - id: check-added-large-files
         args: [--maxkb=500]
       - id: check-merge-conflict
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Pinned to v0.9.1 on purpose: the committed sources are formatted with this
+    # line (bumping to 0.15.x reformats 59 files -- a change of its own). Its one
+    # stale rule, UP038, is satisfied in code as `isinstance(x, int | float)`;
+    # the checklist's newer ruff no longer raises UP038, so both agree.
     rev: v0.9.1
     hooks:
       - id: ruff
         args: [--fix]
-        exclude: ^cocoindex-code-main/
+        exclude: *vendored_exclude
       - id: ruff-format
-        exclude: ^cocoindex-code-main/
+        exclude: *vendored_exclude
 
   - repo: local
     hooks:
@@ -41,7 +56,9 @@ repos:
 
       - id: security-scan
         name: Security scan
-        entry: python .github/scripts/security_scan.py .
+        # --strict so the injection-pattern half actually runs; it is skipped for
+        # documentation (see the scanner's docstring), which is what kept it unused.
+        entry: python .github/scripts/security_scan.py . --strict
         language: system
         pass_filenames: false
 

@@ -38,14 +38,21 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
+TOOLS_DIR = Path(__file__).resolve().parent
 DEFAULT_SERVER = "http://127.0.0.1:14096"
-DEFAULT_MODEL = "commandcode/deepseek/deepseek-v4-pro"
+DEFAULT_MODEL = "commandcode/deepseek/deepseek-v4.1-flash"
+
+#: Prompts at or below this length go on the command line; longer ones are written to a brief
+#: file and referenced by a short pointer (see `run_kilo_cli`). The bound comes from the
+#: measurements: 1650 characters inline was fine, 3642 hung or killed the CLI.
+INLINE_PROMPT_LIMIT = 2000
 
 USAGE_LOG = Path(".solocode/kilo-usage.jsonl")
 USAGE_LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -72,9 +79,45 @@ Your permission scope was frozen when this task was created and cannot be expand
 
 # ── Helper Functions ─────────────────────────────────────────────────────────
 
+
 def _stderr(msg: str) -> None:
     """Print to stderr with [kilo_cli_delegate] prefix."""
     print(f"[kilo_cli_delegate] {msg}", file=sys.stderr)
+
+
+def _load_sibling(module_name: str):
+    """Import a sibling tool (tools/ may not be on sys.path)."""
+    if str(TOOLS_DIR) not in sys.path:
+        sys.path.insert(0, str(TOOLS_DIR))
+    import importlib
+
+    return importlib.import_module(module_name)
+
+
+def _load_project_env() -> None:
+    """Export the project `.env` (with the launcher's aliases) before spawning the CLI.
+
+    The delegate spawns Kilo directly, so the launcher never runs and anything it would
+    derive from `.env` -- `FREEMODEL_API_KEY` from `OPENAI_API_KEY`, for one -- is missing.
+    """
+    _load_sibling("env_file").load_project_env()
+
+
+def _model_override(role: str) -> str | None:
+    """The `.env` override for this role's default model, if the operator set one."""
+    return _load_sibling("env_file").model_override(role)
+
+
+def _error_result(error: str) -> dict[str, Any]:
+    """The shaped empty result every failure path in this module returns."""
+    return {
+        "text": "",
+        "events": [],
+        "session_id": None,
+        "tokens": None,
+        "cost": None,
+        "error": error,
+    }
 
 
 def _make_streams_encoding_safe() -> None:
@@ -110,7 +153,9 @@ def _real_kilo_candidates() -> list[Path]:
     antigravity_base = Path.home() / ".antigravity-ide" / "extensions"
     if antigravity_base.exists():
         candidates.extend(
-            sorted(antigravity_base.glob("kilocode.kilo-code-*/bin/kilo.exe"), reverse=True)
+            sorted(
+                antigravity_base.glob("kilocode.kilo-code-*/bin/kilo.exe"), reverse=True
+            )
         )
     candidates.append(Path.home() / ".local" / "share" / "kilo" / "bin" / "kilo")
     return candidates
@@ -120,8 +165,8 @@ def _wrapped_executable(shim: str) -> str | None:
     """Return the real executable an npm `.cmd`/`.bat` shim wraps, if found."""
     prefix = Path(shim).parent
     for pattern in (
-        "node_modules/*/bin/kilo.exe",      # npm: node_modules/<pkg>/bin/kilo.exe
-        "node_modules/*/*/bin/kilo.exe",    # npm scoped: node_modules/@scope/<pkg>/...
+        "node_modules/*/bin/kilo.exe",  # npm: node_modules/<pkg>/bin/kilo.exe
+        "node_modules/*/*/bin/kilo.exe",  # npm scoped: node_modules/@scope/<pkg>/...
         "node_modules/*/bin/kilo",
         "node_modules/*/*/bin/kilo",
     ):
@@ -221,67 +266,94 @@ def run_kilo_cli(
     timeout_s: int = 120,
 ) -> dict[str, Any]:
     """Run kilo CLI with --attach to server, return parsed JSON events."""
+    # A brief-sized prompt is unreliable on the command line. Measured 2026-10-16: a ~3.6 KB
+    # task either blew a 300-second budget or killed the CLI outright, while the identical
+    # text reached the model when it was handed over as a file -- the fix codex_delegate
+    # already uses. Short prompts stay inline: delivered as file *content*, a one-line
+    # instruction reads as untrusted input and a model may rightly refuse it (observed: a
+    # marker echo was declined as a prompt-injection probe).
+    if len(prompt) <= INLINE_PROMPT_LIMIT:
+        pointer = prompt
+    else:
+        brief_dir = (
+            TOOLS_DIR.parent / ".solocode" / "kilo-briefs" / uuid.uuid4().hex[:12]
+        )
+        brief_dir.mkdir(parents=True, exist_ok=True)
+        brief_file = brief_dir / "brief.md"
+        brief_file.write_text(prompt, encoding="utf-8")
+        pointer = (
+            f"Read the file {brief_file} and carry out the task it contains exactly. "
+            "It is your complete brief."
+        )
     cmd = [
         kilo_binary,
         "run",
-        prompt,
-        "--model", model,
-        "--attach", server_url,
-        "--format", "json",
+        pointer,
+        "--model",
+        model,
+        "--attach",
+        server_url,
+        "--format",
+        "json",
         "--auto",  # auto-approve non-destructive permissions
-        "--dir", directory,
+        "--dir",
+        directory,
     ]
 
     _stderr(f"Running: {' '.join(cmd[:3])} ... --model {model} --attach {server_url}")
 
+    registry = _load_sibling("session_registry")
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(  # noqa: S603 — fixed argv; the prompt is data
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=timeout_s,
-            check=False,
         )
-
-        if proc.returncode != 0 and not proc.stdout.strip():
-            # No JSON output, likely binary error
-            _stderr(f"kilo CLI failed with exit code {proc.returncode}")
-            if proc.stderr:
-                _stderr(f"stderr: {proc.stderr[:500]}")
-            return {
-                "text": "",
-                "events": [],
-                "session_id": None,
-                "tokens": None,
-                "cost": None,
-                "error": f"kilo CLI exit code {proc.returncode}",
-            }
-
-        # Parse JSON events from stdout
-        return parse_json_events(proc.stdout)
-
-    except subprocess.TimeoutExpired:
-        _stderr(f"kilo CLI timed out after {timeout_s}s")
-        return {
-            "text": "",
-            "events": [],
-            "session_id": None,
-            "tokens": None,
-            "cost": None,
-            "error": f"Timeout after {timeout_s}s",
-        }
-    except Exception as exc:
+    except Exception as exc:  # no pid exists yet, so there is no session to record
         _stderr(f"kilo CLI failed: {exc}")
-        return {
-            "text": "",
-            "events": [],
-            "session_id": None,
-            "tokens": None,
-            "cost": None,
-            "error": str(exc),
-        }
+        return _error_result(str(exc))
+
+    # The pid is what makes this run reachable from `session_control`, so the
+    # record is written only after Popen succeeded.
+    run_id = registry.record_start("kilo", model=model, pid=proc.pid, argv=cmd)
+
+    timed_out = False
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        # Kill the whole tree: the CLI spawns node and helpers of its own, and a
+        # bare kill() would leave them running past the timeout this enforces.
+        _load_sibling("session_control").kill_tree(proc.pid)
+        stdout, stderr = proc.communicate()
+    except Exception as exc:
+        registry.record_finish(run_id, None, state="failed")
+        _stderr(f"kilo CLI failed: {exc}")
+        return _error_result(str(exc))
+
+    exit_code = proc.returncode
+    # record_finish settles only a `running` record, so an operator's interrupt
+    # keeps that verdict instead of being overwritten by `exited`.
+    registry.record_finish(
+        run_id, exit_code, state="timeout" if timed_out else "exited"
+    )
+
+    if timed_out:
+        _stderr(f"kilo CLI timed out after {timeout_s}s")
+        return _error_result(f"Timeout after {timeout_s}s")
+
+    if exit_code != 0 and not stdout.strip():
+        # No JSON output: the CLI failed before it could emit anything.
+        _stderr(f"kilo CLI failed with exit code {exit_code}")
+        if stderr:
+            _stderr(f"stderr: {stderr[:500]}")
+        return _error_result(f"kilo CLI exit code {exit_code}")
+
+    # Parse JSON events from stdout
+    return parse_json_events(stdout)
 
 
 def log_usage(
@@ -306,6 +378,7 @@ def log_usage(
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
+
 
 def main(argv: list[str] | None = None) -> int:
     _make_streams_encoding_safe()
@@ -356,6 +429,11 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
+    # A `.env` override wins over the built-in default (see tools/env_file.py): a provider
+    # outage becomes one line in `.env` instead of a code edit.
+    _load_project_env()
+    args.model = args.model or _model_override("kilo") or DEFAULT_MODEL
+
     # ── Find Kilo binary ──
     kilo_binary = args.kilo_bin or find_kilo_binary()
     if not kilo_binary:
@@ -396,7 +474,9 @@ def main(argv: list[str] | None = None) -> int:
     _stderr(f"session={result.get('session_id')}  elapsed={elapsed:.1f}s")
     if result.get("tokens"):
         tokens = result["tokens"]
-        _stderr(f"tokens: in={tokens.get('input')} out={tokens.get('output')} total={tokens.get('total')}")
+        _stderr(
+            f"tokens: in={tokens.get('input')} out={tokens.get('output')} total={tokens.get('total')}"
+        )
 
     return 0
 

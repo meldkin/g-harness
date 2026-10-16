@@ -21,6 +21,26 @@ The payoff is real and measured. On a repo-wide audit (2026-07-26) Gemini read
 writing the brief and verifying the result — roughly **95% saving, ~20x
 leverage**. That ratio is the entire reason the mechanism exists.
 
+## Making it effective — measured (2026-10-07)
+
+Three `--allow-tools` runs on broad tasks all **timed out at 400s**, while
+generation-only runs finished in **18–32s**. Cause: with tools, the worker spends
+its budget exploring the tree (one repo held a 2 GB `node_modules`), and every tool
+call adds a permission round-trip.
+
+**Protocol that works — the orchestrator reads, Gemini reasons:**
+
+| # | Rule | Why |
+|---|---|---|
+| 1 | The orchestrator gathers the files and inlines the needed excerpts in the prompt. Pass **no** `--allow-tools`. | Tool exploration is what times out |
+| 2 | One question per call; keep the prompt ≤ ~1 page. | Long prompts drift and slow the model |
+| 3 | Pass the prompt as a **single line**. PowerShell mangles multi-line arguments, and an embedded `"` makes argparse split the prompt into extra args. | Measured failure: `unrecognized arguments` |
+| 4 | Use `--allow-tools` only when the task truly must run commands; down it with `--target-dir` narrowed to the smallest directory and list the exact commands. | Avoids traversing a huge tree |
+| 5 | Timeout: 180s for generation-only, 900s for a tool-using run. | 400s was too short for tool runs, needlessly long for generation |
+| 6 | On timeout resume with `--continue-latest` (or `--conversation <id>`). | The wrapper prints the id only on success |
+
+Measured: generation-only 18.2s and 31.6s; `--allow-tools` 400s timeout (×2).
+
 ## Why not the SDK or IDE chat command
 
 Two dead ends, both verified — do not re-investigate without new information:

@@ -1,0 +1,17 @@
+# Set OPENROUTER_API_KEY outside this file. The pi-ai adapter already ships in dsh-base.
+- id: llm-pi-ai
+  config:
+    providers:
+      openrouter:
+        apiKeyEnv: OPENROUTER_API_KEY
+        api: openai-completions
+        baseURL: https://openrouter.ai/api/v1
+        models:
+          - id: deepseek/deepseek-chat
+            contextWindow: 64000
+            maxTokens: 8192
+- insert:
+    - id: solo-policy
+      name: '@solo-code/dsh-solo-policy'
+    - id: solo-guidance
+      name: '@solo-code/dsh-solo-guidance'

@@ -3,11 +3,20 @@
 # Pattern ported from codebase-memory-mcp (scripts/security-allowlist.txt).
 #
 # Format: filepath:function:justification
-# Every "dangerous" call in the codebase must appear here with a
-# justification, OR the security scan will flag it.
 #
-# This replaces hardcoded exceptions in security_scan.py and serves
-# as auditable documentation of every risky call site.
+# STATUS: AUDIT RECORD ONLY -- no tool reads this file.
+#
+# The original claim here was that every dangerous call "must appear here ...
+# OR the security scan will flag it". That was never true: security_scan.py has
+# no concept of a function-level allowlist, and nothing else consults the file.
+# It is kept as a human-readable audit trail, not as an enforcement mechanism.
+# Do not read membership as permission, and do not read absence as a finding.
+#
+# What actually gates risky calls today:
+#   - tools/check_lint_budget.py pins the S/BLE finding count for the repo
+#   - `security_scan.py --strict` scans UNSAFE_PATTERNS in code (docs exempt)
+#   - .claude/hooks/guard.py and .kilo/hooks/pre-tool-use/gate-guard.js block
+#     destructive commands at tool-call time
 
 # ── Subprocess execution ──────────────────────────────────────
 tools/deploy.py:_run_command:git init/scaffold/deploy operations are the intended purpose of the deploy tool

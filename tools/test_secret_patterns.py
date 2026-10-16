@@ -41,6 +41,8 @@ SECRET_SCAN_JS = ROOT / ".kilo" / "hooks" / "pre-tool-use" / "secret-scan.js"
 
 sys.path.insert(0, str(ROOT / ".github" / "scripts"))
 from security_scan import SECRET_PATTERNS as CI_PATTERNS  # noqa: E402
+from security_scan import UNSAFE_PATTERNS as CI_UNSAFE_PATTERNS  # noqa: E402
+from security_scan import scan_file as ci_scan_file  # noqa: E402
 
 # ── Shared corpus ────────────────────────────────────────────────────────
 # Synthetic values: correct SHAPE, never a real credential. Each entry is
@@ -179,3 +181,65 @@ def test_all_three_scanners_agree(sample_id, line):
     }
     missed = [name for name, caught in verdicts.items() if not caught]
     assert not missed, f"{sample_id} caught by some scanners but missed by: {missed}"
+
+
+# ── 5. strict mode: injection patterns in code, never in prose ────────────
+# `UNSAFE_PATTERNS` sat behind `--strict` with no caller, so a whole class of
+# injection patterns was never scanned by any gate. Turning it on over prose
+# produced 68 findings, every one a false positive, so docs are excluded while
+# secrets stay included everywhere.
+
+
+def test_strict_does_not_scan_prose_for_injection_patterns(tmp_path):
+    doc = tmp_path / "skill.md"
+    doc.write_text("Never call `eval(` or `os.system(` on user input.\n", encoding="utf-8")
+    assert ci_scan_file(doc, strict=True) == []
+
+
+def test_strict_still_scans_secrets_in_prose(tmp_path):
+    doc = tmp_path / "skill.md"
+    doc.write_text('ANTHROPIC_API_KEY="sk-ant-AbCdEf1234567890AbCdEfGhIjKl"\n', encoding="utf-8")
+    assert ci_scan_file(doc, strict=True), "a secret in a .md file must still be caught"
+
+
+def test_strict_flags_injection_patterns_in_code(tmp_path):
+    code = tmp_path / "app.py"
+    code.write_text("os.system(user_input)\n", encoding="utf-8")
+    findings = ci_scan_file(code, strict=True)
+    assert any("UNSAFE" in desc for _path, desc, _line in findings)
+
+
+def test_non_strict_ignores_injection_patterns(tmp_path):
+    code = tmp_path / "app.py"
+    code.write_text("os.system(user_input)\n", encoding="utf-8")
+    assert ci_scan_file(code, strict=False) == []
+
+
+# The bare `exec\(` rule also matched the argv wrapper `exec(cmd, args)` and its
+# definition, so turning on --strict flagged 17 benign hook call sites. Both
+# directions are pinned: the injection forms still fire, the argv forms do not.
+
+EXEC_INJECTION_FORMS = [
+    "exec(userInput)",
+    'exec("rm -rf " + userInput)',
+    "exec(`rm -rf ${target}`)",
+]
+
+EXEC_ARGV_FORMS = [
+    "exec('git', ['status'])",
+    "exec(cmd, args)",
+    "const r = exec(cmd, ['--version'])",
+    "function exec(command, args, cwd = process.cwd()) {",
+]
+
+
+@pytest.mark.parametrize("line", EXEC_INJECTION_FORMS)
+def test_exec_pattern_flags_injection_forms(line):
+    hits = [desc for pattern, desc in CI_UNSAFE_PATTERNS if re.search(pattern, line)]
+    assert any("exec(" in desc for desc in hits), f"missed: {line}"
+
+
+@pytest.mark.parametrize("line", EXEC_ARGV_FORMS)
+def test_exec_pattern_allows_argv_forms(line):
+    hits = [desc for pattern, desc in CI_UNSAFE_PATTERNS if re.search(pattern, line)]
+    assert not any("exec(" in desc for desc in hits), f"false positive: {line}"

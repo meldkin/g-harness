@@ -20,13 +20,14 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
+TOOLS_DIR = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.shared_state import SharedState  # noqa: E402
 
 DEFAULT_MODEL = "gemini-3.8-flash-medium"
-DEFAULT_TIMEOUT_SECONDS = 120
+DEFAULT_TIMEOUT_SECONDS = 600
 DIRECTORY_LOCK_ENGINE = "gemini"
 
 GUARDRAIL = """STRICT OPERATING CONSTRAINTS (must follow, no exceptions):
@@ -45,12 +46,23 @@ def _stderr(message: str) -> None:
     print(f"[antigravity_delegate] {message}", file=sys.stderr)
 
 
+def _load_sibling(module_name: str):
+    """Import a sibling tool (tools/ may not be on sys.path)."""
+    if str(TOOLS_DIR) not in sys.path:
+        sys.path.insert(0, str(TOOLS_DIR))
+    import importlib
+
+    return importlib.import_module(module_name)
+
+
 def _make_streams_encoding_safe() -> None:
     """Never crash on worker output the console encoding cannot represent.
 
     agy frequently returns non-Latin characters (arrows, em-dashes, box drawing);
     printing those to a cp1252 console on Windows raises UnicodeEncodeError and
-    would discard the whole result. Keep the console's encoding, only relax errors.
+    would discard the whole result. This does NOT preserve the console's encoding:
+    it switches the streams to UTF-8 with `errors=replace`, so an unrepresentable
+    character becomes a substitute glyph instead of killing the run.
     """
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
@@ -121,7 +133,9 @@ def parse_ndjson_events(output: str) -> dict[str, Any]:
         except json.JSONDecodeError:
             continue
         result["events"].append(event)
-        result["conversation_id"] = result["conversation_id"] or event.get("conversation_id")
+        result["conversation_id"] = result["conversation_id"] or event.get(
+            "conversation_id"
+        )
 
         if event.get("event") == "step_update":
             step = event.get("step_update", {})
@@ -147,7 +161,10 @@ def parse_ndjson_events(output: str) -> dict[str, Any]:
             result["usage"] = final.get("usage")
             result["denied_actions"] = final.get("denied_actions") or []
             if final.get("status") != "SUCCESS":
-                result["error"] = final.get("error") or f"Antigravity result status: {final.get('status')}"
+                result["error"] = (
+                    final.get("error")
+                    or f"Antigravity result status: {final.get('status')}"
+                )
 
     result["text"] = "".join(deltas)
     if not result["text"] and isinstance(result["response"], str):
@@ -162,7 +179,11 @@ def parse_ndjson_events(output: str) -> dict[str, Any]:
 def resolve_allowed_directory(value: str, target_dir: Path) -> tuple[Path, str]:
     """Resolve an allowed directory and reject paths outside the workspace."""
     supplied = Path(value)
-    resolved = (target_dir / supplied).resolve() if not supplied.is_absolute() else supplied.resolve()
+    resolved = (
+        (target_dir / supplied).resolve()
+        if not supplied.is_absolute()
+        else supplied.resolve()
+    )
     try:
         relative = resolved.relative_to(target_dir)
     except ValueError as exc:
@@ -221,7 +242,9 @@ def snapshot_workspace(root: Path) -> dict[str, str]:
         if is_snapshot_ignored(relative):
             continue
         try:
-            snapshot[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+            snapshot[relative.as_posix()] = hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
         except OSError:
             continue
     return snapshot
@@ -229,7 +252,11 @@ def snapshot_workspace(root: Path) -> dict[str, str]:
 
 def changed_workspace_paths(before: dict[str, str], after: dict[str, str]) -> list[str]:
     """Return created, modified, and deleted paths between two snapshots."""
-    return sorted(path for path in before.keys() | after.keys() if before.get(path) != after.get(path))
+    return sorted(
+        path
+        for path in before.keys() | after.keys()
+        if before.get(path) != after.get(path)
+    )
 
 
 def paths_outside_directory(paths: list[str], allowed_dir: str) -> list[str]:
@@ -237,11 +264,18 @@ def paths_outside_directory(paths: list[str], allowed_dir: str) -> list[str]:
     if allowed_dir == ".":
         return []
     prefix = allowed_dir.rstrip("/") + "/"
-    return [path for path in paths if path != allowed_dir and not path.startswith(prefix)]
+    return [
+        path for path in paths if path != allowed_dir and not path.startswith(prefix)
+    ]
 
 
 def build_prompt(
-    task: str, *, allow_dir: str | None, auto_approve: bool, guardrail: bool, allow_tools: bool = False
+    task: str,
+    *,
+    allow_dir: str | None,
+    auto_approve: bool,
+    guardrail: bool,
+    allow_tools: bool = False,
 ) -> str:
     """Create the worker prompt with the execution policy visible to the model."""
     policy = ""
@@ -290,47 +324,95 @@ def run_agy_cli(
     if skip_permissions:
         command.append("--dangerously-skip-permissions")
     try:
-        process = subprocess.run(  # noqa: S603 -- binary is discovered or explicitly supplied by the caller
+        process = subprocess.Popen(  # noqa: S603 -- binary is discovered or explicitly supplied by the caller
             command,
             cwd=target_dir,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=timeout_s,
-            check=False,
         )
-    except subprocess.TimeoutExpired:
-        return {"text": "", "error": f"Timeout after {timeout_s}s"}, 124
-    except OSError as exc:
+    except OSError as exc:  # no pid exists yet, so there is no session to record
         return {"text": "", "error": str(exc)}, 1
 
-    parsed = parse_ndjson_events(process.stdout)
-    parsed["stderr"] = process.stderr or ""
+    # The pid is what makes this run reachable from `session_control`, so the
+    # record is written only after Popen succeeded.
+    registry = _load_sibling("session_registry")
+    run_id = registry.record_start(
+        "antigravity", model=model, pid=process.pid, argv=command
+    )
+
+    timed_out = False
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        # Kill the whole tree: agy keeps helpers of its own, and a bare kill()
+        # would leave them running past the timeout this call enforces.
+        _load_sibling("session_control").kill_tree(process.pid)
+        stdout, stderr = process.communicate()
+
+    # record_finish settles only a `running` record, so an operator's interrupt
+    # keeps that verdict instead of being overwritten by `exited`.
+    registry.record_finish(
+        run_id, process.returncode, state="timeout" if timed_out else "exited"
+    )
+    if timed_out:
+        return {"text": "", "error": f"Timeout after {timeout_s}s"}, 124
+
+    parsed = parse_ndjson_events(stdout)
+    parsed["stderr"] = stderr or ""
     if process.returncode != 0:
-        parsed["error"] = parsed.get("error") or f"agy exited with code {process.returncode}"
-        if process.stderr:
-            _stderr(process.stderr[:500].strip())
+        parsed["error"] = (
+            parsed.get("error") or f"agy exited with code {process.returncode}"
+        )
+        if stderr:
+            _stderr(stderr[:500].strip())
     return parsed, process.returncode
 
 
 def main(argv: list[str] | None = None) -> int:
     _make_streams_encoding_safe()
-    parser = argparse.ArgumentParser(description="Antigravity headless delegation wrapper")
+    parser = argparse.ArgumentParser(
+        description="Antigravity headless delegation wrapper"
+    )
     parser.add_argument("prompt", help="Self-contained task for the worker")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Model ID (default: {DEFAULT_MODEL})")
-    parser.add_argument("--target-dir", default=".", help="Workspace directory (default: current directory)")
-    parser.add_argument("--allow-dir", help="Writable directory inside --target-dir; required with --auto-approve")
-    parser.add_argument("--auto-approve", action="store_true", help="Allow writes inside --allow-dir")
+    parser.add_argument(
+        "--model", default=DEFAULT_MODEL, help=f"Model ID (default: {DEFAULT_MODEL})"
+    )
+    parser.add_argument(
+        "--target-dir",
+        default=".",
+        help="Workspace directory (default: current directory)",
+    )
+    parser.add_argument(
+        "--allow-dir",
+        help="Writable directory inside --target-dir; required with --auto-approve",
+    )
+    parser.add_argument(
+        "--auto-approve", action="store_true", help="Allow writes inside --allow-dir"
+    )
     parser.add_argument(
         "--allow-tools",
         action="store_true",
         help="Auto-approve read/execute tool use without granting a write scope",
     )
-    parser.add_argument("--no-guardrail", action="store_true", help="Skip the prompt guardrail in read-only mode only")
+    parser.add_argument(
+        "--no-guardrail",
+        action="store_true",
+        help="Skip the prompt guardrail in read-only mode only",
+    )
     parser.add_argument("--agy-bin", help="Path to agy executable")
-    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS, help="Timeout in seconds")
-    parser.add_argument("--conversation", help="Resume a previous agy conversation by ID")
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT_SECONDS,
+        help="Timeout in seconds",
+    )
+    parser.add_argument(
+        "--conversation", help="Resume a previous agy conversation by ID"
+    )
     parser.add_argument(
         "--continue-latest",
         action="store_true",
@@ -357,7 +439,11 @@ def main(argv: list[str] | None = None) -> int:
     if not target_dir.is_dir():
         parser.error(f"--target-dir is not a directory: {target_dir}")
     try:
-        _, allowed_relative = resolve_allowed_directory(args.allow_dir, target_dir) if args.allow_dir else (None, None)
+        _, allowed_relative = (
+            resolve_allowed_directory(args.allow_dir, target_dir)
+            if args.allow_dir
+            else (None, None)
+        )
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -402,14 +488,19 @@ def main(argv: list[str] | None = None) -> int:
             continue_latest=args.continue_latest,
         )
         if result.get("conversation_id"):
-            _stderr(f"conversation={result['conversation_id']} (resume with --conversation)")
+            _stderr(
+                f"conversation={result['conversation_id']} (resume with --conversation)"
+            )
         if result.get("text"):
             print(result["text"], end="" if result["text"].endswith("\n") else "\n")
         if args.auto_approve:
             changed = changed_workspace_paths(before, snapshot_workspace(target_dir))
             outside = paths_outside_directory(changed, allowed_relative)
             if outside:
-                _stderr("scope violation; changed outside --allow-dir: " + ", ".join(outside))
+                _stderr(
+                    "scope violation; changed outside --allow-dir: "
+                    + ", ".join(outside)
+                )
                 return 4
         if result.get("denied_actions"):
             names = ", ".join(
@@ -436,13 +527,17 @@ def main(argv: list[str] | None = None) -> int:
         if not result.get("text"):
             _stderr("worker produced no output and reported no error")
             return exit_code if exit_code == 124 else 2
-        _stderr(f"model={args.model} elapsed={time.monotonic() - started:.1f}s exit={exit_code}")
+        _stderr(
+            f"model={args.model} elapsed={time.monotonic() - started:.1f}s exit={exit_code}"
+        )
         return 0
     finally:
         if locked:
             with SharedState() as state:
                 state.release_directory_lock(
-                    allowed_relative, engine=DIRECTORY_LOCK_ENGINE, session_id=session_id
+                    allowed_relative,
+                    engine=DIRECTORY_LOCK_ENGINE,
+                    session_id=session_id,
                 )
 
 

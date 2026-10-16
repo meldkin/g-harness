@@ -43,9 +43,9 @@ except UnicodeEncodeError:
 
 
 def print_header(text: str):
-    print(f"\n{Colors.BOLD}{Colors.CYAN}{'='*60}{Colors.ENDC}")
+    print(f"\n{Colors.BOLD}{Colors.CYAN}{'=' * 60}{Colors.ENDC}")
     print(f"{Colors.BOLD}{Colors.CYAN}{text.center(60)}{Colors.ENDC}")
-    print(f"{Colors.BOLD}{Colors.CYAN}{'='*60}{Colors.ENDC}\n")
+    print(f"{Colors.BOLD}{Colors.CYAN}{'=' * 60}{Colors.ENDC}\n")
 
 
 def print_step(text: str):
@@ -62,6 +62,26 @@ def print_warning(text: str):
 
 def print_error(text: str):
     print(f"{Colors.RED}[{SYM_BAD}] {text}{Colors.ENDC}")
+
+
+def coverage_ratchet_check(project_path: Path) -> dict | None:
+    """Run the coverage ratchet when the project has opted into one.
+
+    Returns the run_check result, or None when the project carries no budget
+    file -- a project that never opted in is not failed by this gate. Extracted
+    from the P2 block so both branches are unit-testable without executing the
+    real ratchet (which runs the whole suite under coverage).
+    """
+    gate = project_path / "tools" / "coverage_gate.py"
+    budget = project_path / "tools" / "config" / "coverage-budget.json"
+    if not (gate.exists() and budget.exists()):
+        print_warning("No coverage budget found, skipping coverage ratchet")
+        return None
+    return run_check(
+        "Coverage Ratchet",
+        [sys.executable, str(gate)],
+        timeout=900,
+    )
 
 
 def run_check(
@@ -140,10 +160,24 @@ def print_summary(results: list[dict]) -> bool:
     return True
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
+    """The CLI surface, separate from main() so it can be tested without running
+    the gate: checking that `--fast` exists and defaults correctly beats asserting
+    it by executing a five-minute checklist."""
     parser = argparse.ArgumentParser(description="Master validation checklist")
     parser.add_argument("project", help="Project path to validate")
     parser.add_argument("--url", help="URL for performance checks")
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Skip the coverage ratchet (it re-runs the whole suite, ~3 min). Use "
+        "while iterating; run the full gate before a commit.",
+    )
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
 
     project_path = Path(args.project).resolve()
@@ -163,7 +197,7 @@ def main():
         results.append(
             run_check(
                 "Secret Scan",
-                [sys.executable, str(scanner), str(project_path)],
+                [sys.executable, str(scanner), str(project_path), "--strict"],
                 timeout=120,
             )
         )
@@ -173,9 +207,7 @@ def main():
     # P1: Lint & Type Check
     print_header("P1: CODE QUALITY")
     results.append(
-        run_check(
-            "Ruff Linter", ["ruff", "check", str(project_path)], timeout=120
-        )
+        run_check("Ruff Linter", ["ruff", "check", str(project_path)], timeout=120)
     )
 
     npm = project_path / "package.json"
@@ -227,7 +259,11 @@ def main():
         results.append(
             run_check(
                 "Guard Hook Syntax",
-                [sys.executable, "-c", f"import py_compile; py_compile.compile(r'{guard_hook}', doraise=True)"],
+                [
+                    sys.executable,
+                    "-c",
+                    f"import py_compile; py_compile.compile(r'{guard_hook}', doraise=True)",
+                ],
                 timeout=30,
             )
         )
@@ -237,20 +273,31 @@ def main():
     # Python pytest suite under tools/
     tools_dir = project_path / "tools"
     if tools_dir.is_dir() and any(tools_dir.rglob("test_*.py")):
+        # timeout=300, not 120: the suite runs ~95-130s on Windows (the guard
+        # parity corpus launches node + python per case), so 120 sat on the
+        # boundary and produced intermittent "Pytest: TIMEOUT" failures under
+        # load. The other long steps (coverage, npm) already allow 300-900s.
         results.append(
             run_check(
                 "Pytest",
                 [sys.executable, "-m", "pytest", str(tools_dir)],
-                timeout=120,
+                timeout=300,
             )
         )
     else:
         print_warning("No tools/ test suite found, skipping pytest")
 
+    coverage_result = None if args.fast else coverage_ratchet_check(project_path)
+    if coverage_result is not None:
+        results.append(coverage_result)
+
     if npm.exists():
         results.append(
             run_check(
-                "Tests", ["npm", "test", "--", "--passWithNoTests"], timeout=300, required=False
+                "Tests",
+                ["npm", "test", "--", "--passWithNoTests"],
+                timeout=300,
+                required=False,
             )
         )
     else:
@@ -259,7 +306,9 @@ def main():
     # P3: Build check
     print_header("P3: BUILD")
     if npm.exists():
-        results.append(run_check("Build", ["npm", "run", "build"], timeout=300, required=False))
+        results.append(
+            run_check("Build", ["npm", "run", "build"], timeout=300, required=False)
+        )
 
     all_passed = print_summary(results)
     sys.exit(0 if all_passed else 1)

@@ -69,7 +69,7 @@ description: "Run through this before shipping a harness to production or handin
 - [ ] Eval criteria are written down before the task starts, not after
 - [ ] Security scan passes before any commit
 - [ ] No-skips policy enforced: `python .github/scripts/check_skips.py tools/`
-- [ ] All "dangerous" calls in `security-allowlist.txt` have current, correct justifications
+- [ ] `security-allowlist.txt` is read as an audit trail only — no tool enforces it (see its header)
 
 ## Observability
 
@@ -95,7 +95,7 @@ description: "Run through this before shipping a harness to production or handin
 | security_scan.py | CI must independently verify code safety | Model output is guaranteed safe by construction |
 | checklist.py | Manual verification pipeline needed | Integrated CI/CD with agent-native checkpoints |
 | check_skips.py | Model/developer may add skip() markers that silently degrade coverage | All test frameworks enforce skip-justification natively |
-| security-allowlist.txt | Security scanner false-positives need auditable justification trail | All "dangerous" patterns detectable statically without exceptions |
+| security-allowlist.txt | Human-readable audit trail for risky call sites — NOT enforced by any tool (see its header) | — |
 | eval_harness.py | Harness behavior must be independently tested | Harness is verified by model provider's compliance testing |
 
 ---

@@ -1,4 +1,4 @@
-# Solo-Code-Harness — Specification (SPEC) v4.1.0
+# Solo-Code-Harness — Specification (SPEC) v4.4.0
 
 > Tài liệu này mô tả harness CẦN LÀM GÌ. Khi tái tạo, agent chỉ được dùng
 > SPEC này + bộ harness đang hoạt động. KHÔNG được copy file từ repo gốc.
@@ -7,20 +7,21 @@
 > Lịch sử quyết định chi tiết: `.kilo/memory/MEMORY.md` → "Decisions"
 > (bản gần) + `.kilo/memory/decisions-archive.md` (bản cũ đã nén) + `git log`.
 > Version của SPEC.md là version tài liệu, độc lập với `.harness.lock`'s
-> `[harness] version` (engine-generation version, hiện `4.0.0`) — hai con
+> `[harness] version` (engine-generation version, hiện `4.3.1`) — hai con
 > số không bắt buộc phải khớp nhau.
 
 ## 0. Bản chất & phạm vi [HARD]
 
 - Harness là bộ **cấu hình + rule + skill + script** biến AI coding agent thành
   "Solo-Code Engineer có kỷ luật". KHÔNG phải app chạy độc lập.
-- Engine hỗ trợ thật (đã cài đặt + verify): **Kilo Code** (nguồn gốc),
-  **Claude Code** (orchestrator, generate từ Kilo), **GitHub Copilot**
-  (mirror thủ công), **Gemini/Antigravity** (mirror thủ công + human-relay
-  handoff protocol, không có CLI headless).
-- **OpenCode đã bị gỡ bỏ vật lý ở v4.0.0** — từng là bản mirror 100% của
-  Kilo, không còn giá trị riêng sau khi Claude Code đạt full parity.
-  Cursor **không** được hỗ trợ thật (không có `.cursor/`) — nếu tài liệu cũ
+- Engine hỗ trợ thật (đã cài đặt + verify 2026-10-16): **Kilo Code** (nguồn gốc),
+  **Claude Code** (generate từ Kilo), **OpenCode v2** (engine chính: `@opencode/cli`
+  + `@opencode/plugin`, config sinh bởi `tools/opencode_engine.py`), **GitHub Copilot**
+  (mirror thủ công), **Gemini/Antigravity** (mirror thủ công + human-relay handoff, và
+  CLI headless `agy` dùng làm worker), **Codex** (`codex-cli 0.162.1` qua `codex-env.ps1`).
+- `.opencode/` từng bị gỡ ở v4.0.0 rồi **đưa lại thành engine chính ở v4.2.0** — tài
+  liệu nào còn nói "đã gỡ bỏ vật lý" là lỗi thời.
+- Cursor **không** được hỗ trợ thật (không có `.cursor/`) — nếu tài liệu cũ
   còn nhắc tới, đó là aspirational, không phải hiện trạng.
 
 ### 0.1 Ranh giới LOẠI TRỪ [HARD]
@@ -30,8 +31,8 @@ Harness ngồi trên IDE/model/host — không thay thế chúng.
 
 | LOẠI TRỪ | Ví dụ | Lý do thật |
 |---|---|---|
-| **Infrastructure runtime** | Docker container, VM sandbox, Kubernetes pod | Host OS + IDE đã cô lập process. Harness không phải container runtime. |
-| **External server/protocol** | MCP memory server, ACP client, OpenTelemetry collector | Model provider + IDE đã có session management. Harness không phải middleware. |
+| **Infrastructure runtime** | Docker container, VM, Kubernetes pod | Vẫn loại trừ (không phải container runtime). **Ngoại lệ có điều kiện 2026-10-16:** `tools/win_sandbox.py` gọi cơ chế ACL *sẵn có của Windows* qua `ctypes`, không cài thêm gì — và đo được nó **không dùng được cho worker gọi mạng** (TLS fail dưới restricted token: `SEC_E_NO_CREDENTIALS`), nên nó là bằng chứng, không phải lớp cách ly đang chạy. |
+| **External server/protocol** | MCP memory server, ACP client, OpenTelemetry collector | Vẫn loại trừ (không server ngoài, không middleware). **Ngoại lệ có điều kiện 2026-10-16:** registry + control plane cục bộ (`tools/session_registry.py`, `tools/session_control.py`; JSON trong `.solocode/`, cap 200 record) và GUI **loopback** `tools/gui_server.py` — stdlib-only. |
 | **Package registry** | Plugin marketplace, npm-style registry | Git repo đã là registry. Harness không cần package manager riêng. |
 | **External service SDK** | Langfuse, AgentOps, Sentry SDK | IDE/terminal agent đã có tracing/logging nội bộ. Harness không phải observability backend. |
 | **Benchmark farm** | Docker-based harness comparison, multi-model eval pipeline | Benchmark là bài toán của model provider, không phải của bộ rule+skill. |
@@ -58,6 +59,20 @@ Nếu plugin bắt đầu chứa code tự dựng lại native capability → v�
 
 > Kiểm chứng: `python tools/garden.py` — 0 drift.
 
+## 0.2 Pipeline 4 vai trò [HARD — mô tả sản phẩm]
+
+| Vai trò | Ai | Việc |
+|---|---|---|
+| **Điều phối** | **Jev** — agent chạy trên **model JEV** (`openrouter/jev-router`) | Nhận bài, chia task, gọi worker qua CLI, thu kết quả, chạy gate |
+| **Ra đề bài + verify** | **Codex / ChatGPT** (`gpt-6.1-sol`, effort `medium`, đổi được bằng `--model`/`--effort`) | Viết brief cho thay đổi; **verify** kết quả trả về (read-only) |
+| **Code sâu** | **DeepSeek V4.1 Flash** qua OpenCode CLI; `dsh` cho việc DeepSeek-native | Cài đặt theo brief |
+| **Việc nhanh nhẹ** | **Gemini 3.8 Flash** qua Antigravity CLI | Tra cứu/đọc nhanh — token free |
+
+- **Fallback:** khi Codex không ổn định, **DeepSeek viết brief và thẩm tra lại kết quả của Gemini**; Jev vẫn điều phối.
+- Jev **chỉ điều phối**: `edit: deny` trong agent config, và wrapper chạy agent này **không kèm `--auto`** để deny có hiệu lực thật.
+- Verify live 2026-10-16: Jev→Codex `CODEX_VIA_JEV_OK` · DeepSeek `DEEPSEEK_ARM_OK` · Gemini `GEMINI_ARM_OK` · Codex trực tiếp `CODEX_ARM_OK`, và trả đúng `DEFAULT_MODEL=gpt-6.1-sol DEFAULT_EFFORT=medium`.
+- **Giới hạn đã đo:** nhánh DeepSeek **từ chối task tài liệu quy mô lớn** (2 lần liên tiếp không ghi file: một lần exit 2, một lần hỏi lại "viết vào đâu") — dùng nó cho task hẹp với đường dẫn đích tường minh. Nhánh **dsh đã verify 2026-10-16** (`DSH_ARM_OK`, 7s) sau 3 điều kiện: `pnpm build` trong checkout, `DSH_CLIENT_COMMIT_HASH` (checkout không có `.git`), và **bỏ `DEEPSEEK_BASE_URL`** khỏi môi trường (nếu còn, dsh 404 vì protocol `messages` của nó).
+
 ## 1. Cấu trúc thư mục [HARD]
 
 Phải tồn tại các thư mục: `.claude/` `.copilot/` `.github/` `.gemini/` `.kilo/` `.vscode/`
@@ -77,10 +92,14 @@ Phải tồn tại các thư mục: `.claude/` `.copilot/` `.github/` `.gemini/`
 | `.gitleaks.toml` | Git leak detection rules | Allowlist `.venv`, `node_modules` |
 | `.ruff.toml` | Python lint config (KHÔNG nằm trong `pyproject.toml`) | PEP 8, E501 tắt toàn cục |
 | `tools/` | Generator, validator, drift detector, integration tests, shared-state | `generate_harness.py`, `garden.py`, `test_*.py`, `deploy.py`, `validate_schemas.py`, `shared_state.py` — stdlib-only, KHÔNG deploy ra project đích |
+| `tools/session_registry.py` + `tools/session_control.py` | Registry + control plane phiên con: `list`/`send`/`interrupt`/`prune` | JSON trong `.solocode/sessions/` (gitignored); chỉ settle record `running`; cap 200 record đã settle |
+| `tools/win_sandbox.py` | Sandbox ACL Windows (bằng chứng + task offline) | **Không** dùng được cho worker gọi mạng — TLS fail dưới restricted token |
+| `tools/gui_server.py` + `tools/gui/` | Console worker cục bộ | Loopback + token; biết worker/model từ catalog |
 | `.solocode/shared-state.db` | Cross-engine shared state (SQLite) | Local-only, KHÔNG commit git, chỉ dùng cho coordination state (lock/feature/session log) — KHÔNG dùng cho project memory/decisions (đó là `.kilo/memory/*.md`) |
 
-> `opencode.json`, `docs/specs/` không còn tồn tại (đã gỡ ở v4.0.0 và
-> dọn dẹp 2026-07-24 tương ứng) — nếu tài liệu khác còn nhắc, là lỗi thời.
+> `opencode.json` và `.opencode/` **tồn tại** trở lại từ v4.2.0 và là engine chính
+> (xem §0) — câu "đã gỡ ở v4.0.0" trong bản v4.1.0 là lỗi thời. `docs/specs/` vẫn
+> không tồn tại (đã dọn 2026-07-24).
 
 ## 2. File cấu hình hợp lệ [HARD]
 
@@ -231,6 +250,14 @@ Lịch sử đầy đủ + lý do từng quyết định: `.kilo/memory/MEMORY.m
 "Decisions" (bản đang hoạt động) và `.kilo/memory/decisions-archive.md`
 (bản đã nén ra khỏi MEMORY.md để giữ dưới ngưỡng `memory_gate`). Các mốc
 lớn kể từ v3.3.0:
+
+- **v4.4.0 / v4.3.1** (2026-10-16): SPEC khai **pipeline 4 vai trò** (§0.2) + quy tắc
+  fallback; sửa danh sách engine (OpenCode là engine chính, thêm Codex); chuyển
+  sandbox/control-plane/GUI thành **ngoại lệ có điều kiện** kèm giới hạn đã đo; catalog
+  **80 model / 4 provider** (commandcode 70, freemodel 3, deepseek 2, openrouter 5) gồm
+  `typesafe/jev-router` (model tên Jev); `.harness.lock`
+  regenerate được (`deploy.py --root-lock`) với `[shared_files]` phủ đủ 111 đường dẫn
+  được track.
 
 - **v4.0.0**: gỡ vật lý `.opencode/` (không còn giá trị riêng); adopt
   **Kilo CLI** làm worker engine rẻ/nhanh.

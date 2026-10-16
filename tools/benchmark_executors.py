@@ -130,6 +130,44 @@ MODELS = {
         "provider": "commandcode",
         "display": "DeepSeek V4 Pro (baseline)",
     },
+    # Added 2026-10-06 (Step 5 Preview). `id` verified against the provider /models
+    # endpoints; `deepseek-v4.1-flash` is unavailable on the official DeepSeek API,
+    # so it is reachable here only through CommandCode or OpenRouter.
+    "deepseek-v4.1-flash": {
+        "id": "commandcode/deepseek-v4.1-flash",
+        "provider": "commandcode",
+        "display": "DeepSeek V4.1 Flash",
+    },
+    "deepseek-v4.1-flash-openrouter": {
+        "id": "openrouter/deepseek-v4.1-flash",
+        "provider": "openrouter",
+        "display": "DeepSeek V4.1 Flash (OpenRouter)",
+    },
+    "claude-sonnet-5.5": {
+        "id": "commandcode/claude-sonnet-5.5",
+        "provider": "commandcode",
+        "display": "Claude Sonnet 5.5",
+    },
+    "grok-4.7": {
+        "id": "commandcode/grok-4.7",
+        "provider": "commandcode",
+        "display": "Grok 4.7",
+    },
+    "gpt-6-sol": {
+        "id": "commandcode/gpt-6-sol",
+        "provider": "commandcode",
+        "display": "GPT-6 Sol",
+    },
+    "mimo-v2.6-pro": {
+        "id": "commandcode/mimo-v2.6-pro",
+        "provider": "commandcode",
+        "display": "MiMo V2.6 Pro",
+    },
+    "step-5-preview": {
+        "id": "commandcode/step-5-preview",
+        "provider": "commandcode",
+        "display": "Step 5 Preview",
+    },
 }
 
 # ── Data Structures ──────────────────────────────────────────────────────────

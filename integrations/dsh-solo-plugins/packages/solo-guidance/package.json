@@ -1,0 +1,11 @@
+{
+  "name": "@solo-code/dsh-solo-guidance",
+  "version": "0.1.0",
+  "description": "Solo-Code planning, review, debugging, and verification skills for DeepSeek Harness",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  }
+}

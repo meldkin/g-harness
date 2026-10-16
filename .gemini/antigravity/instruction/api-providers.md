@@ -10,6 +10,7 @@ This project supports two external LLM API providers beyond the primary Copilot 
 |----------|----------|-------------|---------|
 | **DeepSeek** | OpenAI-compatible | `DEEPSEEK_BASE_URL` | `DEEPSEEK_API_KEY` |
 | **CommandCode** | OpenAI-compatible proxy | `COMMANDCODE_BASE_URL` | `COMMANDCODE_API_KEY` |
+| **OpenRouter** | OpenAI-compatible proxy | fixed (`_OPENROUTER_BASE_URL`) | `OPENROUTER_API_KEY` |
 
 Both providers expose OpenAI-compatible `/v1/chat/completions` endpoints. CommandCode proxies multiple models (Claude, GPT, Gemini, DeepSeek, Qwen, Kimi, GLM, MiniMax, Step) through a single API key.
 
@@ -28,9 +29,12 @@ Set these environment variables before use. Never hardcode keys in source files.
 [Environment]::SetEnvironmentVariable("COMMANDCODE_BASE_URL", "https://api.commandcode.ai/provider/v1", "User")
 [Environment]::SetEnvironmentVariable("COMMANDCODE_API_KEY", "cc-your-commandcode-key", "User")
 
-# DeepSeek direct (optional — not configured in this repo)
+# DeepSeek direct
 [Environment]::SetEnvironmentVariable("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1", "User")
 [Environment]::SetEnvironmentVariable("DEEPSEEK_API_KEY", "sk-your-deepseek-key", "User")
+
+# OpenRouter (endpoint is fixed in tools/opencode_engine.py)
+[Environment]::SetEnvironmentVariable("OPENROUTER_API_KEY", "sk-or-your-key", "User")
 ```
 
 After setting, restart VS Code for Copilot to pick up the new variables.
@@ -40,8 +44,8 @@ After setting, restart VS Code for Copilot to pick up the new variables.
 ### Available Models via CommandCode
 
 The ids below were verified against `GET {COMMANDCODE_BASE_URL}/models` on
-2026-09-28. The catalog is larger (~80 models — Claude, GPT, Gemini, Qwen, Kimi,
-GLM, MiniMax, Grok, MiMo, Step, …); enumerate it with:
+2026-10-06. The catalog is larger (84 models — Claude, GPT, Gemini, Qwen, Kimi,
+GLM, MiniMax, Grok, MiMo, Step, Ling, Muse Spark, …); enumerate it with:
 
 ```powershell
 Invoke-RestMethod -Uri "$env:COMMANDCODE_BASE_URL/models" `
@@ -52,9 +56,9 @@ Invoke-RestMethod -Uri "$env:COMMANDCODE_BASE_URL/models" `
 | Model ID | Family | Best For |
 |----------|--------|----------|
 | `deepseek/deepseek-v4-pro` | DeepSeek | Harness default for the OpenCode CLI engine (`opencode.json`) and the Kilo orchestrator (`agent.yaml`) |
-| `deepseek/deepseek-v4.1-flash` | DeepSeek | Newer flash tier — 1M context, cheaper than pro |
+| `deepseek/deepseek-v4.1-flash` | DeepSeek | Harness `small_model` (`opencode.json`) — 1M context, cheaper than pro |
 | `deepseek/deepseek-v4-flash` | DeepSeek | Previous flash tier. Retired for new Claude sessions (`tools/solocode_config.py`), still served by CommandCode and used by `tools/benchmark_executors.py` |
-| `gpt-5.4-mini` | OpenAI | Harness `small_model` (`opencode.json`) — fast completions, simple tasks |
+| `gpt-5.4-mini` | OpenAI | Fast completions, simple tasks (former harness `small_model`) |
 | `gpt-5.4` / `gpt-5.5` | OpenAI | Broad knowledge, explanations |
 | `claude-opus-5` / `claude-sonnet-5` | Anthropic | Complex reasoning, architecture, code review |
 | `google/gemini-3.5-flash` | Google | Large context analysis |
@@ -63,20 +67,54 @@ Invoke-RestMethod -Uri "$env:COMMANDCODE_BASE_URL/models" `
 | `zai-org/GLM-5` / `zai-org/GLM-5.1` | Z.ai | Benchmarked in `tools/benchmark_executors.py` |
 | `moonshotai/Kimi-K3` | Moonshot | Long-context code review |
 | `MiniMaxAI/MiniMax-M3` | MiniMax | General purpose |
+| `deepseek/deepseek-v4.1-flash-fast` | DeepSeek | ~250-300 TPS, 1M context |
+| `claude-sonnet-5-5` / `claude-opus-5-5` | Anthropic | Latest Claude flagships, 1M context |
+| `z-ai/glm-5.3-flashx` | Z.ai | ~200 TPS, 1M context, multimodal |
+| `meta/muse-spark-1.3` | Meta | Max reasoning effort for harder problems |
+| `gpt-6-sol` / `gpt-6.1-sol` / `gpt-6-luna` | OpenAI | Latest GPT-6 family, 1.05M context |
+| `inclusionai/ling-3.1-flash:free` | InclusionAI | Free, 262K context |
+| `xiaomi/mimo-v2.6-pro` / `xiaomi/mimo-v2.6-flash` | Xiaomi | 1M context |
+| `xai/grok-4.7` | xAI | 500K context, strong reasoning |
+| `Qwen/Qwen3.8-Omni-Flash` | Alibaba | 1M context, multimodal |
+| `stepfun/Step-5-Preview` | StepFun | 1M context, preview |
 
 Each model also exposes `context_length` in the `/models` response, so read that
 rather than assuming a window size.
 
 ### Available Models via DeepSeek Direct
 
-`[UNVERIFIED]` — the direct endpoint is not configured in this repo (no
-`DEEPSEEK_*` entry in `.env`), so these ids were not checked against a live
-`GET {DEEPSEEK_BASE_URL}/models`.
+The harness declares a self-contained `deepseek` provider in
+`.opencode/opencode.json`, generated from `_DEEPSEEK_MODELS` in
+`tools/opencode_engine.py` (base URL `${DEEPSEEK_BASE_URL}`, key
+`DEEPSEEK_API_KEY`, both from `.env`). The `.env.template` ships
+`https://api.deepseek.com/v1`.
+
+Verified 2026-10-06 against `GET {DEEPSEEK_BASE_URL}/models`: the official API
+serves two ids, both reporting `context_window` 1,048,576 and
+`max_output_tokens` 393,216.
+
+| Model ID | Reported name | Best For |
+|----------|---------------|----------|
+| `deepseek-flash` | DeepSeek-V4.1-Flash | DeepSeek V4.1 Flash on the direct API |
+| `deepseek-v4-pro` | DeepSeek-V4-Pro | Flagship, deep reasoning |
+
+> The direct API names V4.1 Flash **`deepseek-flash`**. The id
+> `deepseek-v4.1-flash` exists only on CommandCode and OpenRouter.
+
+### Available Models via OpenRouter
+
+The harness declares a self-contained `openrouter` provider (`_OPENROUTER_MODELS`,
+base URL `https://openrouter.ai/api/v1`, key `OPENROUTER_API_KEY`). DeepSeek ids
+verified against `GET https://openrouter.ai/api/v1/models` (465 models,
+2026-10-06); the V4 family reports a 1,048,576-token context. `:batch` and
+`~`-prefixed alias ids are excluded.
 
 | Model ID | Best For |
 |----------|----------|
-| `deepseek-chat` | General purpose |
-| `deepseek-reasoner` | Deep reasoning, chain-of-thought |
+| `deepseek/deepseek-v4.1-flash` | The extra route to DeepSeek V4.1 Flash |
+| `deepseek/deepseek-v4-pro` | Flagship, deep reasoning |
+| `deepseek/deepseek-v4-flash` | Fast, cheap |
+| `deepseek/deepseek-v4-flash-vision-exp` | Multimodal (experimental) |
 
 ## API Usage Patterns
 

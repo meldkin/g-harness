@@ -131,6 +131,108 @@ def check_agents(src: Path, dst: Path, dst_label: str) -> list[str]:
     return _check_parity_dir(src, dst, dst_label, "agents")
 
 
+def _permission_block(path: Path) -> str:
+    """Return an agent file's `permission:` block as normalized text ("" if none).
+
+    Agents are the one artifact whose frontmatter is semantically transformed
+    per engine, so the manual-parity engines (.copilot, .gemini) must carry the
+    source block verbatim. Comparing this text is what catches a hand-edit that
+    reached only some engines -- `check_agents` compares filenames only.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0].strip() != "---":
+        return ""
+    kept: list[str] = []
+    inside = False
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        if not inside:
+            if line.strip() == "permission:":
+                inside = True
+                kept.append("permission:")
+            continue
+        if line.strip() and not line[0].isspace():
+            break  # dedent to the next top-level key ends the block
+        if line.strip():
+            kept.append(line.rstrip())
+    return "\n".join(kept)
+
+
+def check_agent_permissions(src: Path, dst: Path, dst_label: str) -> list[str]:
+    """Check the `permission:` block matches between .kilo/agents/ and a mirror.
+
+    A `bash: deny` -> `bash: ask` change once reached .kilo/ and .opencode/ while
+    .copilot/ and .gemini/ kept the old value, and garden still reported 0 drift.
+    """
+    issues: list[str] = []
+    src_dir = src / "agents"
+    dst_dir = dst / "agents"
+    if not src_dir.is_dir() or not dst_dir.is_dir():
+        return issues
+    for agent_file in sorted(src_dir.glob("*.md")):
+        dst_file = dst_dir / agent_file.name
+        if not dst_file.is_file():
+            continue  # absent copy is already reported by check_agents
+        want = _permission_block(agent_file)
+        if want != _permission_block(dst_file):
+            issues.append(
+                f"Permission drift: {dst_label}/agents/{agent_file.name} block differs "
+                f"from .kilo/agents/{agent_file.name} (resync it verbatim)"
+            )
+    return issues
+
+
+def check_claude_agent_tools(src: Path, dst: Path) -> list[str]:
+    """Check .claude/agents/*.md `tools:` still equals what the source derives.
+
+    Claude Code expresses permissions as a bare tool-name allowlist, so the
+    mapping is lossy: `bash: ask` and `bash: allow` both become `Bash`. That
+    lossiness is by design (see claude_engine._build_tools_allowlist), so the
+    only assertable property is that the generated allowlist matches the current
+    source block -- which catches a hand-edited .claude/ file, not a widening.
+    """
+    try:
+        from tools.claude_engine import (  # noqa: PLC0415 -- cycle-free at call time
+            _build_tools_allowlist,
+            _parse_kilo_permissions,
+        )
+        from tools.claude_engine import (
+            _split_frontmatter as _ce_split_frontmatter,
+        )
+    except ImportError as exc:
+        return [f"Cannot check .claude agent tools (claude_engine import failed): {exc}"]
+
+    issues: list[str] = []
+    src_dir = src / "agents"
+    dst_dir = dst / "agents"
+    if not src_dir.is_dir() or not dst_dir.is_dir():
+        return issues
+    for agent_file in sorted(src_dir.glob("*.md")):
+        dst_file = dst_dir / agent_file.name
+        if not dst_file.is_file():
+            continue
+        src_split = _ce_split_frontmatter(agent_file.read_text(encoding="utf-8"))
+        dst_split = _ce_split_frontmatter(dst_file.read_text(encoding="utf-8"))
+        if src_split is None or dst_split is None:
+            continue
+        perms, _description, _mode = _parse_kilo_permissions(src_split[0])
+        expected = ", ".join(_build_tools_allowlist(perms))
+        actual = ""
+        for line in dst_split[0].splitlines():
+            if line.startswith("tools:"):
+                actual = line.split(":", 1)[1].strip()
+                break
+        if actual != expected:
+            issues.append(
+                f"Agent tools drift: .claude/agents/{agent_file.name} has "
+                f"tools=[{actual or 'inherit'}] but its source permission block "
+                f"derives tools=[{expected or 'inherit'}] "
+                "(run 'python tools/generate_harness.py --harness claude')"
+            )
+    return issues
+
+
 def check_instructions(src: Path, dst: Path, dst_label: str) -> list[str]:
     """Check that all src/instruction/ files have a direct dst/ copy (same filename)."""
     issues: list[str] = []
@@ -373,6 +475,7 @@ def check_claude(src: Path, dst: Path, *, skip_set: set[str] | None = None) -> l
 
     # Agents (same subdir name)
     issues.extend(_check_parity_dir(src, dst, ".claude", "agents"))
+    issues.extend(check_claude_agent_tools(src, dst))
 
     # Skills: .kilo/skill/* dirs must exist in .claude/skills/*
     src_skills = src / "skill"
@@ -514,6 +617,7 @@ def check_gemini(src: Path, dst: Path, *, skip_set: set[str] | None = None) -> l
 
     # Agents (same subdir name)
     issues.extend(_check_parity_dir(src, dst, ".gemini/antigravity", "agents"))
+    issues.extend(check_agent_permissions(src, dst, ".gemini/antigravity"))
 
     # Skills: .kilo/skill/* dirs must exist in .gemini/antigravity/skills/*
     src_skills = src / "skill"
@@ -650,6 +754,10 @@ def run_engine_checks(
     issues: list[str] = []
     checks = [
         (f"Agent drift ({dst_label})", lambda: check_agents(src, dst, dst_label)),
+        (
+            f"Permission drift ({dst_label})",
+            lambda: check_agent_permissions(src, dst, dst_label),
+        ),
         (
             f"Instruction drift ({dst_label})",
             lambda: (

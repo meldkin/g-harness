@@ -1,0 +1,12 @@
+{
+  "name": "@solo-code/dsh-solo-policy",
+  "version": "0.1.0",
+  "description": "Balanced Solo-Code safety policy for DeepSeek Harness tools",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./rules": "./src/rules.js"
+  }
+}

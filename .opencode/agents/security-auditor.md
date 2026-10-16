@@ -5,7 +5,7 @@ color: "#EF4444"
 permissions:
   - action: edit
     resource: "*"
-    effect: deny
+    effect: allow
   - action: read
     resource: "*"
     effect: allow

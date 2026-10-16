@@ -83,7 +83,7 @@ _DISABLED_SKILL_PERMISSION = "ask"
 # `commandcode/<id>` reference is introduced.
 _PROVIDER_ID = "commandcode"
 _DEFAULT_MODEL = "commandcode/deepseek-v4-pro"
-_SMALL_MODEL = "commandcode/gpt-5.4-mini"
+_SMALL_MODEL = "commandcode/deepseek-v4.1-flash"
 # FreeModel's `/v1/models` is stale: it still lists `gpt-6-luna` (now HTTP 404)
 # and omits `gpt-6.1-sol`. Verified 2026-10-03 by posting a chat completion to
 # each id: `gpt-6-sol` and `gpt-6-astra` answer as themselves, `gpt-6.1-sol`
@@ -147,7 +147,527 @@ _PROVIDER_MODELS: dict[str, dict[str, Any]] = {
         "name": "Qwen 3.6 Plus",
         "limit": {"context": 1000000, "output": 131072},
     },
+    # Added 2026-10-06 from plan.md (Step 5 Preview). `modelID` and `context`
+    # verified against GET {COMMANDCODE_BASE_URL}/models (84-model catalog,
+    # 2026-10-06); `output` caps are family estimates, not from the catalog.
+    # "Muse Spark 1.3 Max" has no catalog id -- only `meta/muse-spark-1.3`;
+    # "Space Bunny Alpha" and "Jev" are absent (Jev is an agent, not a model).
+    "deepseek-v4.1-flash-fast": {
+        "modelID": "deepseek/deepseek-v4.1-flash-fast",
+        "name": "DeepSeek V4.1 Flash Fast",
+        "limit": {"context": 1000000, "output": 384000},
+    },
+    "claude-sonnet-5.5": {
+        "modelID": "claude-sonnet-5-5",
+        "name": "Claude Sonnet 5.5",
+        "limit": {"context": 1000000, "output": 131072},
+    },
+    "claude-opus-5.5": {
+        "modelID": "claude-opus-5-5",
+        "name": "Claude Opus 5.5",
+        "limit": {"context": 1000000, "output": 131072},
+    },
+    "glm-5.3-flashx": {
+        "modelID": "z-ai/glm-5.3-flashx",
+        "name": "GLM-5.3 FlashX",
+        "limit": {"context": 1000000, "output": 131072},
+    },
+    "muse-spark-1.3": {
+        "modelID": "meta/muse-spark-1.3",
+        "name": "Muse Spark 1.3",
+        "limit": {"context": 1048576, "output": 131072},
+    },
+    "gpt-6.1-sol": {
+        "modelID": "gpt-6.1-sol",
+        "name": "GPT-6.1 Sol",
+        "limit": {"context": 1050000, "output": 128000},
+    },
+    "gpt-6-sol": {
+        "modelID": "gpt-6-sol",
+        "name": "GPT-6 Sol",
+        "limit": {"context": 1050000, "output": 128000},
+    },
+    "gpt-6-luna": {
+        "modelID": "gpt-6-luna",
+        "name": "GPT-6 Luna",
+        "limit": {"context": 1050000, "output": 128000},
+    },
+    "mimo-v2.6-pro": {
+        "modelID": "xiaomi/mimo-v2.6-pro",
+        "name": "MiMo V2.6 Pro",
+        "limit": {"context": 1048576, "output": 131072},
+    },
+    "mimo-v2.6-flash": {
+        "modelID": "xiaomi/mimo-v2.6-flash",
+        "name": "MiMo V2.6 Flash",
+        "limit": {"context": 1048576, "output": 131072},
+    },
+    "grok-4.7": {
+        "modelID": "xai/grok-4.7",
+        "name": "Grok 4.7",
+        "limit": {"context": 500000, "output": 131072},
+    },
+    "qwen3.8-omni-flash": {
+        "modelID": "Qwen/Qwen3.8-Omni-Flash",
+        "name": "Qwen 3.8 Omni Flash",
+        "limit": {"context": 1000000, "output": 131072},
+    },
+    "step-5-preview": {
+        "modelID": "stepfun/Step-5-Preview",
+        "name": "Step 5 Preview",
+        "limit": {"context": 1000000, "output": 131072},
+    },
+    # commandcode/* catalog extended from model.csv (2026-10-15). `name` and
+    # `context` mirror that file; `output` caps are family estimates, the same
+    # convention as the 2026-10-06 block above. modelIDs verified against the
+    # provider's public catalog (GET {COMMANDCODE_BASE_URL}/models -> 90 ids,
+    # 2026-10-15); three rows were mapped by hand where the CSV name did not match
+    # an id (Tencent Hy4 Preview, Tencent Hy3, MiMo V2.5 Pro-99%). `Jev` is an agent,
+    # not a model, and the CSV's footer row is not a model either.
+    # `output` is capped at 65536 for the non-DeepSeek families below, not 131072:
+    # measured 2026-10-15, declaring 131072 against google/gemini-3.8-flash fails
+    # with "maxOutputTokens value of 131072 but the supported range is from 1
+    # (inclusive) to 65537 (exclusive)" -- the ceiling is a request parameter, so an
+    # over-estimate makes the model unusable rather than merely optimistic.
+    "minimax-m2.5": {
+        "modelID": "MiniMaxAI/MiniMax-M2.5",
+        "name": "MiniMax M2.5",
+        "limit": {"context": 204800, "output": 65536},
+    },
+    "minimax-m2.7": {
+        "modelID": "MiniMaxAI/MiniMax-M2.7",
+        "name": "MiniMax M2.7",
+        "limit": {"context": 204800, "output": 65536},
+    },
+    "minimax-m3": {
+        "modelID": "MiniMaxAI/MiniMax-M3",
+        "name": "MiniMax M3-50%",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "qwen3.6-max-preview": {
+        "modelID": "Qwen/Qwen3.6-Max-Preview",
+        "name": "Qwen 3.6 Max Preview",
+        "limit": {"context": 204800, "output": 65536},
+    },
+    "qwen3.7-flash": {
+        "modelID": "Qwen/Qwen3.7-Flash",
+        "name": "Qwen 3.7 Flash",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "qwen3.7-plus": {
+        "modelID": "Qwen/Qwen3.7-Plus",
+        "name": "Qwen 3.7 Plus",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "qwen3.8-27b": {
+        "modelID": "Qwen/Qwen3.8-27B",
+        "name": "Qwen 3.8 27B",
+        "limit": {"context": 268288, "output": 65536},
+    },
+    "qwen3.8-flash": {
+        "modelID": "Qwen/Qwen3.8-Flash",
+        "name": "Qwen 3.8 Flash",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "qwen3.8-max": {
+        "modelID": "Qwen/Qwen3.8-Max",
+        "name": "Qwen 3.8 Max",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "qwen3.8-max-0902": {
+        "modelID": "Qwen/Qwen3.8-Max-0902",
+        "name": "Qwen 3.8 Max 0902",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "qwen3.8-max-prime": {
+        "modelID": "Qwen/Qwen3.8-Max-Prime",
+        "name": "Qwen 3.8 Max Prime",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "claude-haiku-5-5": {
+        "modelID": "claude-haiku-5-5",
+        "name": "Claude Haiku 5.5",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "deepseek-v4-flash-fast": {
+        "modelID": "deepseek/deepseek-v4-flash-fast",
+        "name": "DeepSeek V4 Flash Fast",
+        "limit": {"context": 1024000, "output": 384000},
+    },
+    "deepseek-v4-flash-vision-exp": {
+        "modelID": "deepseek/deepseek-v4-flash-vision-exp",
+        "name": "DeepSeek V4 Flash Vision (exp)",
+        "limit": {"context": 1024000, "output": 384000},
+    },
+    "gemini-3.7-flash": {
+        "modelID": "google/gemini-3.7-flash",
+        "name": "Gemini 3.7 Flash",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "gemini-3.8-flash": {
+        "modelID": "google/gemini-3.8-flash",
+        "name": "Gemini 3.8 Flash",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "gpt-5.6-luna": {
+        "modelID": "gpt-5.6-luna",
+        "name": "GPT-5.6 Luna",
+        "limit": {"context": 1126400, "output": 128000},
+    },
+    "gpt-5.6-sol": {
+        "modelID": "gpt-5.6-sol",
+        "name": "GPT-5.6 Sol",
+        "limit": {"context": 1126400, "output": 128000},
+    },
+    "ling-3.1-flash-paid": {
+        "modelID": "inclusionai/ling-3.1-flash",
+        "name": "Ling 3.1 Flash",
+        "limit": {"context": 268288, "output": 65536},
+    },
+    "longcat-2.0": {
+        "modelID": "meituan/LongCat-2.0",
+        "name": "LongCat 2.0",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "muse-spark-1.2": {
+        "modelID": "meta/muse-spark-1.2",
+        "name": "Muse Spark 1.2",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "muse-spark-1.2-contributor": {
+        "modelID": "meta/muse-spark-1.2-contributor",
+        "name": "Muse Spark 1.2 Contributor",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "muse-spark-1.3-contributor": {
+        "modelID": "meta/muse-spark-1.3-contributor",
+        "name": "Muse Spark 1.3 Contributor",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "mistral-large-4": {
+        "modelID": "mistral/mistral-large-4",
+        "name": "Mistral Large 4",
+        "limit": {"context": 536576, "output": 65536},
+    },
+    "kimi-k2.5": {
+        "modelID": "moonshotai/Kimi-K2.5",
+        "name": "Kimi K2.5",
+        "limit": {"context": 262144, "output": 65536},
+    },
+    "kimi-k2.6": {
+        "modelID": "moonshotai/Kimi-K2.6",
+        "name": "Kimi K2.6",
+        "limit": {"context": 262144, "output": 65536},
+    },
+    "kimi-k2.7-code": {
+        "modelID": "moonshotai/Kimi-K2.7-Code",
+        "name": "Kimi K2.7 Code",
+        "limit": {"context": 262144, "output": 65536},
+    },
+    "kimi-k2.7-code-highspeed": {
+        "modelID": "moonshotai/Kimi-K2.7-Code-Highspeed",
+        "name": "Kimi K2.7 Code HighSpeed",
+        "limit": {"context": 268288, "output": 65536},
+    },
+    "kimi-k3": {
+        "modelID": "moonshotai/Kimi-K3",
+        "name": "Kimi K3",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "nemotron-3-ultra-550b-a55b": {
+        "modelID": "nvidia/nemotron-3-ultra-550b-a55b",
+        "name": "Nemotron 3 Ultra",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "laguna-s-2.1-free": {
+        "modelID": "poolside/laguna-s-2.1-free",
+        "name": "Laguna S 2.1Free",
+        "limit": {"context": 262144, "output": 65536},
+    },
+    "glyph-cluster": {
+        "modelID": "stealth/glyph-cluster:free",
+        "name": "Glyph ClusterFree",
+        "limit": {"context": 262144, "output": 65536},
+    },
+    "step-3.5-flash": {
+        "modelID": "stepfun/Step-3.5-Flash",
+        "name": "Step 3.5 Flash",
+        "limit": {"context": 268288, "output": 65536},
+    },
+    "step-3.7-flash": {
+        "modelID": "stepfun/Step-3.7-Flash",
+        "name": "Step 3.7 Flash",
+        "limit": {"context": 262144, "output": 65536},
+    },
+    "hy3-paid": {
+        "modelID": "tencent/hy3-paid",
+        "name": "Tencent Hy3",
+        "limit": {"context": 268288, "output": 65536},
+    },
+    "hy4-preview": {
+        "modelID": "tencent/hy4-preview",
+        "name": "Tencent Hy4 Preview",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "inkling": {
+        "modelID": "thinkingmachines/inkling",
+        "name": "Inkling",
+        "limit": {"context": 262144, "output": 65536},
+    },
+    "inkling-small": {
+        "modelID": "thinkingmachines/inkling-small",
+        "name": "Inkling Small",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "grok-4.5": {
+        "modelID": "xai/grok-4.5",
+        "name": "Grok 4.5",
+        "limit": {"context": 512000, "output": 65536},
+    },
+    "grok-4.6": {
+        "modelID": "xai/grok-4.6",
+        "name": "Grok 4.6",
+        "limit": {"context": 512000, "output": 65536},
+    },
+    "mimo-v2.5": {
+        "modelID": "xiaomi/mimo-v2.5",
+        "name": "MiMo V2.5-98%",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "mimo-v2.5-pro": {
+        "modelID": "xiaomi/mimo-v2.5-pro",
+        "name": "MiMo V2.5 Pro-99%",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "mimo-v2.6-pro-ultraspeed": {
+        "modelID": "xiaomi/mimo-v2.6-pro-ultraspeed",
+        "name": "MiMo V2.6 Pro UltraSpeed",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "glm-5.3-flash": {
+        "modelID": "z-ai/glm-5.3-flash",
+        "name": "GLM-5.3 Flash",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "glm-5.2": {
+        "modelID": "zai-org/GLM-5.2",
+        "name": "GLM-5.2",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "glm-5.2-fast": {
+        "modelID": "zai-org/GLM-5.2-Fast",
+        "name": "GLM-5.2 Fast",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    "glm-5.3": {
+        "modelID": "zai-org/GLM-5.3",
+        "name": "GLM-5.3",
+        "limit": {"context": 1024000, "output": 65536},
+    },
+    # Added 2026-10-16 from the live catalog (GET /models): ids, names and context
+    # lengths as the provider reports them. `output` is omitted rather than invented.
+    "claude-sonnet-5": {
+        "modelID": "claude-sonnet-5",
+        "name": "Claude Sonnet 5",
+        "limit": {"context": 1000000},
+    },
+    "claude-sonnet-4-6": {
+        "modelID": "claude-sonnet-4-6",
+        "name": "Claude Sonnet 4.6",
+        "limit": {"context": 1000000},
+    },
+    "claude-fable-5-1": {
+        "modelID": "claude-fable-5-1",
+        "name": "Claude Fable 5.1",
+        "limit": {"context": 1000000},
+    },
+    "claude-fable-5": {
+        "modelID": "claude-fable-5",
+        "name": "Claude Fable 5",
+        "limit": {"context": 1000000},
+    },
+    "claude-opus-5": {
+        "modelID": "claude-opus-5",
+        "name": "Claude Opus 5",
+        "limit": {"context": 1000000},
+    },
+    "claude-opus-4-8": {
+        "modelID": "claude-opus-4-8",
+        "name": "Claude Opus 4.8",
+        "limit": {"context": 1000000},
+    },
+    "claude-opus-4-7": {
+        "modelID": "claude-opus-4-7",
+        "name": "Claude Opus 4.7",
+        "limit": {"context": 1000000},
+    },
+    "claude-haiku-4-5-20251001": {
+        "modelID": "claude-haiku-4-5-20251001",
+        "name": "Claude Haiku 4.5",
+        "limit": {"context": 200000},
+    },
+    "gpt-6-astra": {
+        "modelID": "gpt-6-astra",
+        "name": "GPT-6 Astra",
+        "limit": {"context": 1050000},
+    },
+    "gpt-5.6-terra": {
+        "modelID": "gpt-5.6-terra",
+        "name": "GPT-5.6 Terra",
+        "limit": {"context": 1050000},
+    },
+    "gpt-5.5": {
+        "modelID": "gpt-5.5",
+        "name": "GPT-5.5",
+        "limit": {"context": 400000},
+    },
+    "gpt-5.4": {
+        "modelID": "gpt-5.4",
+        "name": "GPT-5.4",
+        "limit": {"context": 400000},
+    },
+    "gpt-5.3-codex": {
+        "modelID": "gpt-5.3-codex",
+        "name": "GPT-5.3 Codex",
+        "limit": {"context": 400000},
+    },
+    "gemini-4-argon": {
+        "modelID": "google/gemini-4-argon",
+        "name": "Gemini 4 Argon",
+        "limit": {"context": 1000000},
+    },
+    "gemini-3.6-flash": {
+        "modelID": "google/gemini-3.6-flash",
+        "name": "Gemini 3.6 Flash",
+        "limit": {"context": 1000000},
+    },
+    "gemini-3.5-flash": {
+        "modelID": "google/gemini-3.5-flash",
+        "name": "Gemini 3.5 Flash",
+        "limit": {"context": 1000000},
+    },
+    "gemini-3.5-flash-lite": {
+        "modelID": "google/gemini-3.5-flash-lite",
+        "name": "Gemini 3.5 Flash Lite",
+        "limit": {"context": 1000000},
+    },
+    "gemini-3.1-flash-lite": {
+        "modelID": "google/gemini-3.1-flash-lite",
+        "name": "Gemini 3.1 Flash Lite",
+        "limit": {"context": 1000000},
+    },
+    "fugu-ultra": {
+        "modelID": "sakana/fugu-ultra",
+        "name": "Fugu Ultra",
+        "limit": {"context": 1000000},
+    },
+    "nemotron-3.5-super-vl": {
+        "modelID": "nvidia/nemotron-3.5-super-vl",
+        "name": "Nemotron 3.5 Super VL",
+        "limit": {"context": 262144},
+    },
+    "cat-jam": {
+        "modelID": "stealth/cat-jam:free",
+        "name": "Cat Jam",
+        "limit": {"context": 1048576},
+    },
+    "muse-spark-1.1": {
+        "modelID": "meta/muse-spark-1.1",
+        "name": "Muse Spark 1.1",
+        "limit": {"context": 1048576},
+    },
+    "muse-spark-open": {
+        "modelID": "meta/muse-spark-open",
+        "name": "Muse Spark Open",
+        "limit": {"context": 1048576},
+    },
+    "muse-wonder-1.0": {
+        "modelID": "meta/muse-wonder-1.0",
+        "name": "Muse Wonder",
+        "limit": {"context": 1048576},
+    },
 }
+
+# Official DeepSeek API provider (plan.md A1). OpenAI-compatible endpoint fed by
+# DEEPSEEK_API_KEY + DEEPSEEK_BASE_URL from .env (see .env.template).
+# Verified 2026-10-06 against GET {DEEPSEEK_BASE_URL}/models: the official API
+# serves two ids -- `deepseek-flash`, whose reported model name is
+# "DeepSeek-V4.1-Flash", and `deepseek-v4-pro`. So V4.1 Flash IS on the direct
+# API, under the id `deepseek-flash` (there is no `deepseek-v4.1-flash` here).
+# Both report context_window 1,048,576 and max_output_tokens 393,216.
+_DEEPSEEK_MODELS: dict[str, dict[str, Any]] = {
+    "deepseek-flash": {
+        "modelID": "deepseek-flash",
+        "name": "DeepSeek V4.1 Flash (official)",
+        "limit": {"context": 1048576, "output": 393216},
+    },
+    "deepseek-v4-pro": {
+        "modelID": "deepseek-v4-pro",
+        "name": "DeepSeek V4 Pro (official)",
+        "limit": {"context": 1048576, "output": 393216},
+    },
+}
+
+# OpenRouter provider -- an extra route to the DeepSeek models (plan.md A1, D2).
+# OpenRouter's endpoint is a fixed public constant, so it is written here rather
+# than read from .env; only the key is secret. DeepSeek ids verified against
+# GET https://openrouter.ai/api/v1/models (465 models, 2026-10-06); OpenRouter
+# reports a 1,048,576-token context for the V4 family. The `:batch` and
+# `~`-prefixed alias ids are intentionally excluded.
+_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+_OPENROUTER_MODELS: dict[str, dict[str, Any]] = {
+    "deepseek-v4.1-flash": {
+        "modelID": "deepseek/deepseek-v4.1-flash",
+        "name": "DeepSeek V4.1 Flash (OpenRouter)",
+        "limit": {"context": 1048576, "output": 384000},
+    },
+    "deepseek-v4-pro": {
+        "modelID": "deepseek/deepseek-v4-pro",
+        "name": "DeepSeek V4 Pro (OpenRouter)",
+        "limit": {"context": 1048576, "output": 384000},
+    },
+    "deepseek-v4-flash": {
+        "modelID": "deepseek/deepseek-v4-flash",
+        "name": "DeepSeek V4 Flash (OpenRouter)",
+        "limit": {"context": 1048576, "output": 384000},
+    },
+    "deepseek-v4-flash-vision-exp": {
+        "modelID": "deepseek/deepseek-v4-flash-vision-exp",
+        "name": "DeepSeek V4 Flash Vision Exp (OpenRouter)",
+        "limit": {"context": 1048576, "output": 384000},
+    },
+    # The model named "Jev": TypeSafe's router, which picks a model and a reasoning
+    # effort per request. Verified callable 2026-10-15 -- a trivial prompt returned
+    # 200 and the router reported `model: deepseek/deepseek-v4.1-flash`, i.e. it
+    # did the dispatch itself. OpenRouter prices it dynamically (-1 per token)
+    # because the cost depends on the model chosen; its reported context is 1M,
+    # while the harness's model.csv row (32K, $0.04/$0.00) describes the underlying
+    # Jev system model rather than this router.
+    "jev-router": {
+        "modelID": "typesafe/jev-router",
+        "name": "Jev Router (TypeSafe)",
+        "limit": {"context": 1000000, "output": 131072},
+    },
+}
+
+# The Jev agent runs on the model named Jev: TypeSafe's `typesafe/jev-router` on
+# OpenRouter, which picks a model and reasoning effort per request (verified live
+# 2026-10-15 -- it answered and reported routing to deepseek/deepseek-v4.1-flash).
+# Keeping it separate from _DEFAULT_MODEL matters: the default is what every other
+# run uses, while this one is the orchestrator's own brain.
+_JEV_AGENT_MODEL = "openrouter/jev-router"
+# Operator rule (2026-10-15): when the Jev model cannot be loaded, the agent runs
+# on DeepSeek V4.1 Flash -- the harness's default *executor* -- not on the
+# orchestrator default (V4 Pro).
+_JEV_AGENT_FALLBACK = "commandcode/deepseek-v4.1-flash"
+
+
+def _build_agent_models() -> dict[str, dict[str, str]]:
+    """Per-agent model overrides, with the operator's fallback applied."""
+    if "jev-router" in _OPENROUTER_MODELS:
+        return {"jev": {"model": _JEV_AGENT_MODEL}}
+    return {"jev": {"model": _JEV_AGENT_FALLBACK}}
+
 
 # Ordered shell allow/deny rules for the legacy `permission.bash` object.
 #
@@ -230,13 +750,18 @@ def collect_disabled_skills(kilo_root: Path) -> dict[str, str]:
             continue
         for line in fm.splitlines():
             key, _, value = line.partition(":")
-            if key.strip() == "disable-model-invocation" and value.strip().lower() == "true":
+            if (
+                key.strip() == "disable-model-invocation"
+                and value.strip().lower() == "true"
+            ):
                 out[skill_dir.name] = _DISABLED_SKILL_PERMISSION
                 break
     return out
 
 
-def _parse_permission_block(frontmatter: str) -> tuple[list[str], list[tuple[str, list[tuple[str, str]]]]]:
+def _parse_permission_block(
+    frontmatter: str,
+) -> tuple[list[str], list[tuple[str, list[tuple[str, str]]]]]:
     """Split an agent frontmatter into (kept lines, permission entries).
 
     `kept lines` are every frontmatter line outside the `permission:` block,
@@ -302,7 +827,9 @@ def _render_permissions(entries: list[tuple[str, list[tuple[str, str]]]]) -> lis
         if action in _DROP_PERMISSION_KEYS:
             continue
         mapped = _PERMISSION_ACTION_RENAME.get(action, action)
-        ordered = [c for c in children if c[0] == "*"] + [c for c in children if c[0] != "*"]
+        ordered = [c for c in children if c[0] == "*"] + [
+            c for c in children if c[0] != "*"
+        ]
         for resource, effect in ordered:
             if not effect:
                 continue
@@ -383,7 +910,9 @@ def prune_duplicate_skills(kilo_root: Path, opencode_root: Path) -> int:
     for d in sorted(p for p in dst.iterdir() if p.is_dir()):
         if d.name in kilo_ids:
             shutil.rmtree(d)
-            print(f"  [PRUNE] skills/{d.name}/ (mirrors .kilo/skill — already in .claude/skills)")
+            print(
+                f"  [PRUNE] skills/{d.name}/ (mirrors .kilo/skill — already in .claude/skills)"
+            )
             removed += 1
     if not removed:
         print("  [OK] no skill mirror to prune")
@@ -527,8 +1056,8 @@ def generate_opencode_json(
         "$schema": "https://opencode.ai/config.json",
         "model": _DEFAULT_MODEL,
         "small_model": _SMALL_MODEL,
-        "default_agent": "solo-code-engineer",
-        "agents": {"solo-code-engineer": {"model": _DEFAULT_MODEL}},
+        "default_agent": "jev",
+        "agents": _build_agent_models(),
         "permission": permission,
     }
     local_config: dict[str, Any] = {
@@ -559,18 +1088,45 @@ def generate_opencode_json(
                 "settings": {"baseURL": "${OPENAI_BASE_URL}/v1"},
                 "models": _FREEMODEL_MODELS,
             },
+            "deepseek": {
+                "name": "DeepSeek (official)",
+                # Direct DeepSeek API, not a proxy. Both vars come from .env via
+                # opencode-env.ps1; the template ships https://api.deepseek.com/v1.
+                "env": ["DEEPSEEK_API_KEY"],
+                "package": "@opencode/ai/providers/openai-compatible",
+                "settings": {"baseURL": "${DEEPSEEK_BASE_URL}"},
+                "models": _DEEPSEEK_MODELS,
+            },
+            "openrouter": {
+                "name": "OpenRouter",
+                # Only the key is secret; the endpoint is the public constant above.
+                "env": ["OPENROUTER_API_KEY"],
+                "package": "@opencode/ai/providers/openai-compatible",
+                "settings": {"baseURL": _OPENROUTER_BASE_URL},
+                "models": _OPENROUTER_MODELS,
+            },
         },
     }
     opencode_root.mkdir(parents=True, exist_ok=True)
-    _write_if_changed(root_dir / "opencode.json", json.dumps(root_config, indent=2) + "\n")
-    _write_if_changed(opencode_root / "opencode.json", json.dumps(local_config, indent=2) + "\n")
-    note = f" ({len(disabled_skills)} skill permission rule(s))" if disabled_skills else ""
+    _write_if_changed(
+        root_dir / "opencode.json", json.dumps(root_config, indent=2) + "\n"
+    )
+    _write_if_changed(
+        opencode_root / "opencode.json", json.dumps(local_config, indent=2) + "\n"
+    )
+    note = (
+        f" ({len(disabled_skills)} skill permission rule(s))" if disabled_skills else ""
+    )
     print(f"OpenCode config generated: opencode.json + .opencode/opencode.json{note}")
     return 0
 
 
 def generate_all(
-    kilo_root: Path, opencode_root: Path, root_dir: Path, *, skip_names: set[str] | None = None
+    kilo_root: Path,
+    opencode_root: Path,
+    root_dir: Path,
+    *,
+    skip_names: set[str] | None = None,
 ) -> int:
     # skip_names is retained for call-site compatibility; this engine no longer
     # mirrors skills (see prune_duplicate_skills).
@@ -580,12 +1136,22 @@ def generate_all(
     if generate_agents(kilo_root, opencode_root) != 0:
         return 1
     print("--- OpenCode commands ---")
-    generate_commands(kilo_root, opencode_root)
+    if generate_commands(kilo_root, opencode_root) != 0:
+        return 1
     print("--- OpenCode skills ---")
-    prune_duplicate_skills(kilo_root, opencode_root)
+    if prune_duplicate_skills(kilo_root, opencode_root) != 0:
+        return 1
     print("--- OpenCode instructions ---")
-    prune_instructions(opencode_root)
-    generate_instruction_skills(kilo_root, opencode_root)
+    if prune_instructions(opencode_root) != 0:
+        return 1
+    if generate_instruction_skills(kilo_root, opencode_root) != 0:
+        return 1
     print("--- OpenCode config ---")
-    generate_opencode_json(opencode_root, root_dir, collect_disabled_skills(kilo_root))
+    if (
+        generate_opencode_json(
+            opencode_root, root_dir, collect_disabled_skills(kilo_root)
+        )
+        != 0
+    ):
+        return 1
     return 0

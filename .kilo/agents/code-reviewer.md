@@ -3,7 +3,7 @@ description: "Code review specialist – checks quality, security, performance"
 mode: subagent
 color: "#10B981"
 permission:
-  edit: deny
+  edit: allow
   bash: deny
   read: allow
   grep: allow

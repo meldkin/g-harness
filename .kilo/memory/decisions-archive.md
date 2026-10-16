@@ -451,3 +451,664 @@ created: 2026-07-24
   which answers 404, and omits `gpt-6.1-sol`). Declared models are `gpt-6-sol`,
   `gpt-6-astra`, `gpt-6.1-sol`; every other name routes to `gpt-6-sol`
   server-side, so extra aliases add no capability.
+
+## Pruned 2026-10-07 (mem cap)
+
+Moved verbatim out of `MEMORY.md` to stay under the `memory_gate` hard cap.
+
+- [decision] Claude launchers default to full mode; `--bare` is explicit
+  degraded mode.
+- [decision] Codex write path: verified that `Set-Content` is not blocked by
+  Codex CLI; earlier failure was caused by compound commands ending in
+  `Remove-Item -Force` triggering `exec_policy.rs` `rm -f` heuristic under
+  `approval_policy = "never"`. Added verified write path to `tools/codex_guard.py`
+  (`--write` flag with secret scanning and shared state file locking) alongside
+  native `apply_patch` (2026-09-25). Moved here 2026-10-07: MEMORY.md was within
+  19 bytes of the 8,000-char cap.
+
+## Coverage ratchet reset (2026-10-07)
+
+`tools/coverage_gate.py --update` was run to clear a long-standing failure.
+Justification, in full:
+
+- **Accepted (pre-existing, not from this session):**
+  `tools/test_check_lint_budget.py` 98.63 -> 96.84. All three uncovered lines are
+  unreachable by design: two are the `raise AssertionError(...)` bodies of the
+  `boom` helpers that only run when the guard they assert has failed, one is the
+  `sys.path.insert` branch never taken under pytest. `tools/deploy.py`
+  41.25 -> 41.0: two tenths of a percent on 700 statements, no behaviour change;
+  the real gap is 413 uncovered statements at 41%.
+- **NOT accepted:** the `tools/garden.py` regression was caused by this series and
+  was fixed with four real tests covering the new branches, clearing the gate on
+  its own.
+- **Collateral, and a tightening:** 28 files previously absent from the budget
+  entered it, and 23 floors were raised because they were too low to mean
+  anything — `.github/scripts/checklist.py` and `boundary_audit.py` were pinned at
+  0.0 while measuring 39.8 and 45.5; `tools/claude_engine.py` went 37.72 -> 87.35.
+- **Open debt:** 13 tracked files sit at 0.0%, meaning no test imports them:
+  `codex_session`, `codex_usage`, `codex_verify`, `compaction`,
+  `compaction_pruner`, `dsh_delegate`, `harness_config`, `kilo_server_manager`,
+  `kilo_usage_report`, `session_analytics`, `solocode_config`,
+  `.github/scripts/check_skips`, `.github/scripts/eval_harness`. A 0.0 floor is
+  not a floor — the ratchet cannot detect a regression in any of them.
+
+## Guard policy boundary + oracle result (2026-10-07)
+
+Settled policy for the destructive-command guards (`.claude/hooks/guard.py` and
+`.kilo/hooks/pre-tool-use/gate-guard.js`), now also stated in the corpus comment in
+`tools/test_claude_guard.py`:
+
+- **BLOCK** catastrophic or irreversible: a filesystem/system root, a whole system
+  tree, a database, a device, a force-push (including the `+branch` refspec and
+  bundled `-fu`), or a `sudo`/`env`-wrapped one of those.
+- **ALLOW** routine, regenerable or targeted: a build directory, `node_modules`,
+  one file, one temp file, a container run, a feature-branch push.
+- `--force-with-lease` is deliberately ALLOWED at both call sites. It is the
+  alternative this harness recommends, and the guards' own hint text tells people
+  to use it. Do not "correct" this without changing that advice too.
+
+Evidence for the boundary: an independent oracle (Gemini 3.8 Flash high,
+generation-only, expected verdicts withheld) classified all 53 corpus commands
+blind. It disagreed on 10; all 10 were strictness differences, and one was an
+outright error (it allowed `git reset --har HEAD`, measured to discard staged
+changes with exit 0). It found no defect, so it neither validates the corpus nor
+replaces the behavioural parity test — it is recorded as the only independent
+check that the boundary is not merely self-consistent.
+
+Three rounds of guard defects were found in this series, and every round was found
+by an adversary rather than by the author: 9 over-blocks, then 8 more defects plus
+2 cross-engine divergences, then 10 oracle disagreements. The durable lesson:
+change a guard with tests in BOTH directions and a different model reviewing it,
+from the first commit.
+
+
+
+## 2026-10-07 — OpenCode v2 provider routes (moved out of MEMORY.md)
+
+- [decision] Step 5 Preview model routes (2026-10-06): four OpenCode v2 providers --
+  `commandcode`, `freemodel`, `deepseek` (official), `openrouter` -- 31 models total.
+  `_SMALL_MODEL` moved to `commandcode/deepseek-v4.1-flash`. Ids were verified live:
+  the official DeepSeek API names V4.1 Flash **`deepseek-flash`** (reported name
+  "DeepSeek-V4.1-Flash", ctx 1,048,576); the id `deepseek-v4.1-flash` exists on
+  CommandCode (84 models) and OpenRouter (465 models). OpenRouter's endpoint is a
+  fixed public constant; only `OPENROUTER_API_KEY` is secret. `Space Bunny Alpha` is
+  absent from every catalog and was dropped. A new orchestrator agent `jev` routes
+  between DeepSeek V4.1 Flash, Gemini/Antigravity, and OpenCode CLI.
+
+## 2026-10-07 — Guard hardening: full finding list
+
+Eight holes verified by execution and closed in both engines: `rm -rfv /`,
+`rm / -rf`, `git push origin --delete main`, `irm|iwr … | iex`, `Clear-Disk`,
+`reg delete`, `vssadmin delete shadows`.
+
+Independent Codex (gpt-6.1-sol) review rounds found, and were fixed:
+- over-block on quoted searches (`rg 'reg delete'`, `rg 'Clear-Disk'`,
+  `rg 'git push origin --delete main'`) -> new patterns anchored to command position
+- miss on `git push --delete origin main` (remote between flag and branch)
+- over-block on `rm -rf ./build`, `rm -rf /home/..backup`,
+  `rm -rf /home/../workspace/build` -> rm_relative_wildcard / rm_root_escape scoped
+- Kilo-vs-Claude divergence on `bash -c 'rm -rf /'`, `sudo curl x | bash`,
+  `bash -c 'curl x | bash'` -> JS gained a bash-c / wrapper prefix
+
+Pre-existing gaps, verified present at HEAD, NOT caused by this change, still open:
+- `rm -rf build /` (a root as the 2nd argument) — miss
+- `rm -rf '/'` / `rm -rf "/"` (quoted root) — miss
+- `rg 'git push --force origin main' .` and `git commit -m "git push --force origin main"`
+  — over-block (unanchored force_push_*)
+- `xargs -0 rm -rf /` and `git -C . push --force origin main` — miss
+- `rm -rf /tmp/build`, `rm -rf /var/log/app.log`, `Remove-Item -Recurse -Force build`
+  — blocked by design (existing policy, matches the pinned corpus)
+
+Also: `tools/coverage_gate.py` save_budget now writes LF (`newline="\n"`) so the
+budget file stops contradicting .gitattributes on Windows; `.github/scripts/checklist.py`
+pytest timeout raised 120s -> 300s.
+
+### Guard review round 4 (Codex, 2026-10-07)
+
+Fixed (was a self-inflicted divergence): `echo "bash -c 'rm -rf /'"` -- the JS
+guard matched a quoted wrapper. The new `normalizeCommand` port handles it the
+way guard.py's normalize_command does, so the JS `bash -c` prefix was removed
+(and the curl wrapper prefix with it).
+
+Still open, all pre-existing (verified at HEAD; a dedicated hardening task, out of
+scope for this change):
+- unanchored single-token patterns block a search that NAMES them:
+  `rg 'Format-Volume'`, `diskpart`, `shutdown`/`reboot`/`halt`,
+  `win_stop_computer`, `win_restart_computer`
+- misses: `Remove-Item -Recurse C:\`, `rm -rf C:/Windows`, `rm / --verbose -rf`,
+  `nohup git push … --force`, `curl … | env bash`
+- policy over-blocks kept by design: `rm -rf /tmp/<x>`, `rm -rf /var/log/<x>`,
+  `Remove-Item -Recurse -Force <dir>` (pinned by the corpus)
+
+### Guard review rounds 5-6 (Codex, 2026-10-07)
+
+Fixed: anchored `diskpart`, `shutdown|reboot|halt`, `Format-Volume`,
+`Stop-Computer`, `Restart-Computer` to command position (over-blocks on
+`rg 'Format-Volume'` and on commit messages naming them); `rm_flags_after_target`
+now allows benign options around the target, and normalizeCommand unwraps
+`nohup|nice|command|time` (`rm -v / -rf`, `rm / --verbose -rf`,
+`nohup git push --force`); the curl pipe accepts `env [KEY=VAL...]`
+(`curl ... | env FOO=1 bash`).
+
+Still open (pre-existing; its own task, not this change):
+- `rg 'DROP TABLE' .` and `rg 'Remove-Item x -Recurse -Force' .` block a search
+  that only names them -- `drop_table` is deliberately unanchored so a quoted
+  `psql -c "DROP TABLE ..."` still blocks; `win_remove_recursive` is unanchored.
+- a separator inside quoted text is still read as executable:
+  `rg 'echo x; diskpart' .` blocks (a `[;&|]` anchor cannot tell quoted from real).
+- misses: `Remove-Item C:/ -Recurse` (root target), `rm -rf C:/Windows`
+  (Windows system trees are absent from rm_system_dir).
+- divergence: only the Python guard scans command text for secrets, so
+  `echo API_KEY='...'` blocks under Claude, not Kilo (Kilo's secret scan is a
+  separate hook) -- architectural.
+
+## Antigravity headless permission behavior (moved out of MEMORY.md, 2026-10-07)
+
+- [decision] Antigravity headless permission behavior (measured 2026-10-06 on
+  `agy.exe` 1.2.9): a plain read-only run cannot answer the `command` permission
+  prompt, so `run_command` is auto-denied while `result.status` still says
+  `SUCCESS` with `denied_actions` populated. The wrapper now inspects
+  `denied_actions` and per-tool `ERROR` events and exits **5** (empty output
+  exits **2**) instead of a silent success. New `--allow-tools` flag grants
+  read/execute tool use without a write scope (no directory lock, no scope
+  audit); it is mutually exclusive with `--auto-approve`, `--allow-dir`, and
+  `--no-guardrail`. `view_file` works read-only with an absolute path;
+  `grep_search`/`list_dir` usage was unreliable at the low model tier.
+
+## Antigravity delegate re-established — full detail (moved out of MEMORY.md, 2026-10-07)
+
+- [decision] Antigravity headless `agy.exe` delegate **re-established** after
+  the retirement rationale was disproven: the account lockouts were a
+  Google-side update bug, not bot-traffic flags from `agy.exe`; the accounts
+  were reopened and the CLI was never implicated (2026-10-06). Worker runs
+  through `tools/antigravity_delegate.py` — read-only by default, writes need
+  `--allow-dir` + `--auto-approve` with a shared-state directory lock and
+  post-run scope audit. Model is chosen by task complexity via the distinct ids
+  `gemini-3.8-flash-{low,medium,high}`. Quota rotation is manual: `agy.exe`
+  uses the machine-level Antigravity Google account and has no per-run account
+  flag; switch account with `/logout` then re-sign-in, check quota with `/usage`,
+  and resume with `--conversation <id>` or `--continue-latest`. A Gemini API key
+  (`modelProvider: "gemini"` + `GEMINI_API_KEY`) is the headless alternative.
+
+### dsh worker verified (2026-10-07)
+
+`tools/dsh_delegate.py` drives dsh end to end once the reference checkout is
+prepared:
+- `CI=true` -- `pnpm dsh` runs pnpm's dependency check, which aborts without a
+  TTY (`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`).
+- `pnpm build` -- packages are consumed from built output, so several report
+  "failed to import" until the workspace is built. `pnpm install` alone is not
+  enough (it reports "Already up to date").
+- `DSH_CLIENT_COMMIT_HASH=<7-hex>` -- the build script embeds a Git commit hash;
+  a checkout with no `.git` fails `git rev-parse HEAD`.
+
+Two fixes came out of the real run:
+- `UnicodeEncodeError`: dsh prints check marks ('✓') that the Windows console
+  (cp1252) cannot encode, which crashed the wrapper while printing an otherwise
+  fine run. stdout/stderr are now reconfigured to UTF-8 with replacement.
+- `HTTP_404 ... DeepSeek Messages`: the harness forwarded its `.env`
+  `DEEPSEEK_BASE_URL` (`https://api.deepseek.com/v1`, an OpenAI-compatible root),
+  but dsh's default protocol is `messages`, whose root is
+  `https://api.deepseek.com/anthropic`. The base URL is no longer taken from
+  `.env`; it passes through only from the process environment.
+
+## CommandCode model ids and consumers (moved out of MEMORY.md, 2026-10-16)
+
+Verify ids against `GET {COMMANDCODE_BASE_URL}/models`, never from memory: the catalog
+drifts and the old `api-providers.md` advertised nine ids that no longer resolve. Each
+CommandCode consumer declares models separately, so a new model needs one entry in
+`tools/opencode_engine.py` `_PROVIDER_MODELS` (OpenCode), `.vscode/settings.json`
+(Copilot), and `~/.config/kilo/kilo.jsonc` (Kilo). Kilo refs use the full upstream id
+(`commandcode/deepseek/deepseek-v4-pro`) while OpenCode refs use the harness key
+(`commandcode/deepseek-v4-pro`) — both correct for their dialect. `context_length` comes
+from the response, not the file. (2026-09-28)
+
+## Antigravity headless permission behavior (moved out of MEMORY.md, 2026-10-16)
+
+Measured 2026-10-06 on `agy.exe` 1.2.9: exit code 5 on denied actions, 2 on empty output;
+`--allow-tools` and its mutual exclusions with `--auto-approve`/`--allow-dir`/`--no-guardrail`;
+and the `view_file` / `grep_search` caveats.
+
+## Destructive Harness Tooling — full text (moved out of project-conventions.md, 2026-10-16)
+
+Rules earned from `deploy.py` deleting a target project's `package.json`,
+`tsconfig.json`, CI workflows and dev scripts (2026-08-03, see MEMORY.md).
+
+- **A deploy may only delete a path it can prove it wrote.** Never infer ownership from
+  a file's extension, directory or naming pattern — consult an explicit list
+  (`HARNESS_OWNED_ROOT_FILES`, `RETIRED_*`). A target project's root is full of files
+  that look harness-ish and are not ours.
+- `.github/`, `.vscode/` and `tools/` are **shared** with the target project, never
+  wholly harness. Classify any new deployed directory as shared or exclusive; there is
+  no safe default.
+- Any code path that can `unlink()`/`rmtree()` inside a *target* project needs a test
+  that builds a realistic fake project and asserts its files survive. Assert on real
+  damage (`AssertionError`), not on an import error.
+- Before claiming a guard works, run the new test against the pre-fix code and confirm
+  it fails. A guard that passes both ways guards nothing.
+- Prefer an invariant over a case: a test that fails when a future entry is left
+  unclassified beats a test that pins today's list.
+
+## Codex worker arm (moved out of MEMORY.md, 2026-10-16)
+
+`tools/codex_delegate.py` runs Codex through `codex-env.ps1` with a read-only sandbox
+by default (`--allow-write` -> workspace-write; the dangerous flags are never emitted),
+writes the guardrail brief to a file because the Windows npm shim truncates multi-line
+arguments, and returns a post-run git status/diffstat. Codex has no project hooks, so
+`tools/codex_guard.py` stays the separate preflight.
+
+Its brief moved from `%TEMP%` into `.solocode/codex-briefs/` on 2026-10-16, because
+Codex's own sandbox denies reads outside the workspace ("denied by the filesystem
+restrictions") and the worker never saw the task. Model and reasoning effort are
+explicit: `-m gpt-6.1-sol` and `-c model_reasoning_effort="medium"`, overridable per
+call with `--model` / `--effort low|medium|high`.
+
+## Guard hardening summary (moved out of MEMORY.md, 2026-10-15)
+
+33 -> 41 destructive patterns in `.claude/hooks/guard.py` +
+`.kilo/hooks/pre-tool-use/gate-guard.js`. Eight verified holes closed; independent
+Codex (gpt-6.1-sol) review rounds ran, and every self-inflicted regression they
+found was fixed (over-blocks on quoted searches / `./build` / `..`-named files;
+`bash -c` and wrapped-`curl|bash` divergences). New patterns anchor to command
+position, and Kilo gained a `normalizeCommand` port so both engines unwrap
+`sudo`/`env`/`bash -c` alike. Pre-existing gaps still stay open; the full finding
+list is the "Guard hardening: full finding list" section above.
+
+## GUI worker console (moved out of MEMORY.md, 2026-10-15)
+
+A stdlib-only local web app (`tools/gui_server.py` + `tools/gui/index.html`, test
+`tools/test_gui_server.py`) that discovers worker CLIs (agy/opencode/kilo/dsh/codex)
+plus their wrappers, lists the provider/model catalog and `.env` key NAMES (never
+values), and runs a brief through the matching `*_delegate.py`. Loopback-only,
+per-run token, worker+model allowlist. Codex is wired too
+(`tools/codex_delegate.py`, read-only default).
+
+## Coverage (2026-10-07)
+
+Every file that started at 0.0% (13 total) now has tests and the ratchet baseline
+is raised. `pre-commit` is installed and its git hook is active.
+
+## Subagent seam (2026-10-07)
+
+`tools/subagent_cli.py` is the Provider for the Protocol in
+`tools/subagent_seam.py` — a `CliProvider` over the delegate wrappers (evidence
+split from summary) plus a capability/rank dispatcher; `write` is deliberately
+not advertised. Harness version bumped to 4.3.0 across `.harness.lock`,
+`agent.yaml` and `pyproject.toml`.
+
+## Garden agent checks (2026-10-07)
+
+Garden gained "Permission drift" (agent `permission:` block vs `.copilot`/`.gemini`)
+and "Agent tools drift" (derived `.claude` `tools:`); the old `check_agents`
+compared filenames only and reported clean while the engines disagreed. Subagent
+reviewers hold `read` + `edit`, and `code-reviewer` has no shell.
+
+## 2026-10-16 — Memory compaction: entries moved out of MEMORY.md
+
+Moved verbatim so the loaded memory stays under its 8,000-char gate; the live
+one-line rules stayed in `MEMORY.md`.
+
+### subagent-ask
+
+- [decision] Subagent `ask` permission behaves as `allow` (measured,
+  operator-confirmed 2026-10-07): a headless child session has no prompt
+  channel, so `effect: ask` silently permits -- the operator saw no dialog
+  appear during a two-command probe. Use explicit `allow`/`deny`; never `ask`.
+
+### subagent-reviewers
+
+- [decision] Subagent reviewers hold `read` + `edit`, no shell for `code-reviewer`
+  (2026-10-07). Garden's "Permission drift" and "Agent tools drift" checks, and the
+  filename-only `check_agents` they replaced, are in `decisions-archive.md`.
+
+### confinement-coverage
+
+- [decision] Worker confinement mechanism (2026-10-14): `tools/win_sandbox.py` —
+  Windows ACL restricted token, `--also-write` để cấp thêm root ghi, `revert` để gỡ
+  ACE; verify bằng `icacls`. Gotcha: đường CLI chỉ chạy qua subprocess thì coverage
+  không thấy. Budget: giữ số keyless của `test_e2e`.
+
+### g5-branch
+
+- [decision] G5 dừng ở nhánh restricted-token (2026-10-15): `win_sandbox.py` chặn
+  ghi đúng (40 test) **nhưng HTTPS/TLS fail dưới token hạn chế**
+  (`SEC_E_NO_CREDENTIALS`) ⇒ không bọc được worker nào của fleet (mọi worker gọi
+  API). `--confine` trong `codex_delegate` bị chặn có chủ ý; nếu cần cách ly →
+  AppContainer (chưa làm). Việc kế: G7/P2.2 (spec `plan.md` §4.1).
+
+### guard-windows-roots
+
+- [decision] Guard hardening (2026-10-07): 33 -> 41 destructive patterns, 8 verified
+  holes closed, Codex review rounds; the full finding list is in `decisions-archive.md`.
+  The checklist Pytest timeout rose 120s -> 300s (suite ~95-130s on Windows).
+
+### 2026-10-16 - Gotcha: the guard reads the commit message you are writing
+
+`git commit -m "..."` puts the message inside the command string the guard inspects, so a
+message that quotes a destructive invocation literally is read as one. Measured twice on
+2026-10-16: the commit describing the new Windows-root patterns was refused because its
+message contained the wrapped form of the very pattern it documented. The guard was right
+and the message was the problem. Describe such a command in words, or leave out the
+wrapper, when the message has to mention it.
+
+### 2026-10-16 - Gotcha: never run the coverage ratchet concurrently with pytest
+
+Both runs that looked like coverage regressions were measurement artifacts. The ratchet
+invokes `pytest tools/` with `--basetemp` under the same `.pytest_temp` (and shares
+`.pytest_cache`); a second pytest process started while it was running distorts the result.
+Measured on identical code: the concurrent run reported `.claude/hooks/guard.py` at 35.8%
+and `tools/test_guard.py` at 34.1%, while an exclusive run of the same command reported
+50.6% and 68.3% - the latter being +11.2% over the committed baseline. Serialize the gate:
+nothing else may run pytest while the ratchet (or `checklist.py`, which calls it) is active.
+
+### 2026-10-16 - Measured: the suite is 1276 passed / 1 skipped
+
+Full `pytest tools/` with the ratchet's own coverage flags: 1276 passed, 1 skipped, 15
+warnings in 144s. Earlier notes citing 1161-1262 predate this session's additions.
+
+## 2026-10-16 - Pipeline drill: one real task end to end
+
+First full run of the 4-role pipeline on real work instead of arm smoke tests. Task: the
+two guard defects measured that morning (a wrapped rm payload after a separator was
+allowed; a search naming a wrapped Windows removal was blocked). Result: commit `bcfa6bd`.
+
+Who did what, measured:
+
+- **Jev** (`openrouter/jev-router`, `--agent jev`, no `--auto`) returned a routing plan in
+  50s and touched nothing (`git status` clean). Two of its choices were overridden by the
+  orchestrator: it assigned the brief to the orchestrator (design says Codex) and told the
+  implementer to use the free model (design says DeepSeek V4.1 Flash). Its root-cause
+  diagnosis and its three risks were correct.
+- **Codex** (`gpt-6.1-sol`, effort medium, read-only) wrote the implementation brief in
+  222s: exact before/after regex text for both engines, the corpus entries, the
+  must-not-break list, and failure modes. Its edits were applied unchanged.
+- **DeepSeek V4.1 Flash** (OpenCode CLI, `--auto`) applied all four files in 318s and then
+  the session died with `exit 2 / Unknown error`. What was verified is the diff, not the
+  report - the reason the harness forbids trusting self-reports.
+- **Codex** verified: `VERDICT: PASS`, and it stated plainly which claims its read-only
+  sandbox could not test rather than asserting them.
+- **Gemini 3.8 Flash high** (Antigravity CLI, `--allow-tools`, 462s) reviewed independently
+  and earned its keep twice: it corrected the verifier's pattern count (44 in
+  `BLOCK_PATTERNS`, not the 65 a whole-file regex had counted) and found three gaps nobody
+  else saw - a system tree inside a wrapped payload and chained commands inside a wrapped
+  payload, all of which the orchestrator then re-ran to confirm in both engines.
+- **Orchestrator**: 17-command probe through both engines (17/17), three mutation runs
+  (reverting each half of the fix made the new cases fail), 349 guard tests, full checklist
+  7/7 run exclusively, then commit.
+
+Still open, confirmed by re-running them (all predate the change; none is a regression):
+
+- a system tree inside a wrapped payload slips, because the system-tree terminator does not
+  accept a closing quote;
+- chained commands inside a wrapped payload slip, because a quoted span containing a
+  separator is blanked wholesale before matching, and the unwrapping only happens for a
+  leading wrapper.
+
+## 2026-10-16 - Guard round 3: conservative wrapper scanner (commit `c2e174f`)
+
+Round 2 closed four gaps but two of its bypasses were regressions (blocked at HEAD, allowed
+after). Round 3 closes both by making the scanner refuse to guess: the payload scan counts the
+contiguous backslash run before a candidate closing quote (odd = escaped), tracks an inner
+quote of the other kind, treats a doubled quote as the Windows escape, and leaves the text
+untouched on any ambiguity so the masking path that handled those shapes at HEAD still decides.
+The wrapper prefix list gained env, nohup, nice, command and time, closing a payload reached
+through env.
+
+Verification, all measured: a three-way probe (HEAD vs now) over 27 cases, all as required;
+five mutation runs, each reverting one half, each making tests fail, every file restored
+byte-identically; full checklist 7/7 run exclusively. **Zero regressions** from three
+independent sources: the orchestrator's probe, the verifier's attempt to construct one, and
+the reviewer's enumeration of 85 baseline blocked commands against four separators. **Zero
+over-blocks** measured across the 62 safe entries.
+
+**Both reviewers returned FAIL, and every finding was measured against HEAD before being
+accepted - all were pre-existing gaps, not regressions.** That is the rule that matters here:
+a FAIL describing a hole that already existed does not block a change that removes two real
+regressions; a FAIL describing a hole this change created does.
+
+Process notes worth keeping:
+- The orchestrator caught two errors in the round-3 brief before implementation: it had listed
+  five destructive commands (`eval`, pipe-into-shell, escaped spaces, a PowerShell doubled
+  quote, a nested escaped wrapper) as SAFE cases - pinning a gap as desired behaviour - and its
+  `env` helper assertion contradicted its own prefix extension.
+- The implementer made three deliberate deviations and each was right: keeping the standalone
+  sudo prefix, testing the doubled quote before the closing-quote test, and normalising a
+  backslash in an allow entry.
+
+### Open shell-quoting gaps (all pre-existing; allowed at HEAD too)
+
+1. the ambiguity bail-out is per command, not per wrapper, so a clean wrapper later in the
+   same line loses its unwrapping;
+2. a PowerShell payload using doubled quotes `""`;
+3. a nested wrapper whose inner quote is backslash-escaped;
+4. `cmd.exe` treats an apostrophe as a quote: a contraction in a cmd payload forces the bail;
+5. POSIX single quotes have no backslash escape, so the parity rule misfires on them;
+6. a trailing backslash before the closing quote in a `cmd` payload does the same;
+7. `eval 'rm -rf /'`;
+8. pipe-into-shell;
+9. escaped spaces (`sh -c rm\ -rf\ /`);
+10. secrets typed into a Kilo command are not scanned (secret-scan.js is matcher-scoped).
+
+**Round-4 design:** one scanner cannot serve POSIX, cmd and PowerShell - split the lexicon per
+shell family (POSIX: single quotes literal, double quotes backslash-escaped; cmd: `^` escapes,
+`""` for quotes, backslash is only a path separator; PowerShell: backtick escapes), and make
+the bail-out per wrapper instead of per command.
+
+## 2026-10-16 - Guard closed at ten gaps; a one-shot API worker measured; providers mapped
+
+**All ten guard-review gaps are closed** (commit `29b94a8`). The last one, #10, was the
+asymmetry that only the Python engine scanned secrets typed into a command: the Kilo engine now
+mirrors all 23 shapes from that reference in its exact order, `BLOCK_PATTERNS` untouched at 44,
+`secret-scan.js` and `hooks.json` unchanged. Evidence: RED with eight failures (four block cases
+failing only on Kilo plus their parity twins), GREEN at 444 passed, the orchestrator's probe
+10/10 through both engines, and two mutations held (disabling the check fails eight tests,
+neutering one pattern fails two).
+
+**A one-shot API worker, measured against the CLI arms** (`tools/model_api.py`):
+
+| task | direct API | CLI arms |
+|---|---|---|
+| trivial prompt | **2.3s** | Kilo 6-19s, OpenCode 6-17s |
+| single-file change (~10 lines) | **22s**, patch logically correct but fenced with a hunk count off by one -> needed a manual apply | Kilo 1200-1557s for the same class |
+| multi-file brief (130 KB prompt, 38K tokens) | truncated at the token cap, then **HTTP 503 from the provider's Cloudflare worker** | Kilo applied it and ran the tests itself |
+
+The honest reading: direct calls win by 50-70x on small briefs and cannot run tests; the CLI
+loop is what multi-file work needs. Provider ceiling measured: a ~38K-token prompt with a large
+completion draws 503, so keep direct calls small. `model_api.py` strips a wrapping fence and
+records the rest as a known limitation.
+
+**Also in this pass:** `tools/env_file.py` gained the provider map (base-url env, key env,
+catalog path, chat path) as the single answer to which service a model's key comes from - the
+question that exposed the FreeModel outage; the catalog checker reuses it and its probe now
+falls back to reasoning content for the DeepSeek family; `.harness.lock` regenerated for the
+three new harness files (114 shared paths).
+
+**A/B discipline note:** an earlier head-to-head failed on both arms simultaneously - the direct
+arm because of the 503 ceiling, the Kilo arm because the orchestrator had left another Kilo
+session running against the same server. Two works in flight against one resource is an
+orchestration error, not worker flakiness, and the run was discarded rather than reported.
+
+### 2026-10-16 - The second A/B attempt was invalidated too, and again by the orchestrator
+
+The small-task head-to-head (one file, a ~10-line change to `tools/check_model_catalog.py`) had no
+clean result either: the direct arm's patch was applied and committed **before** the Kilo arm was
+launched, so Kilo found the change already present and correctly refused to invent a cosmetic
+diff. Its report is the model to copy - it backed the refusal with `git show HEAD:`,
+`git log -1 -- <file>`, `git show <commit> --` and `git status --porcelain`, and spotted that the
+brief's "measured defect" predated the commit.
+
+Both A/B attempts therefore failed for orchestration reasons, not worker reasons:
+1. two Kilo sessions against one server (the first attempt);
+2. applying one arm's artefact before running the other (the second).
+
+Rule for the next head-to-head: the arms must not share a mutable resource, and neither arm's
+output may enter the tree until both have run.
+
+### 2026-10-16 - The three unquoted-execution misses closed (commit `b65d02d`)
+
+The last open guard items are closed in both engines: an unquoted `eval` argument, an unquoted
+pipeline into a shell, and a path-qualified shell in a pipeline. The eval rule takes an optional
+opening quote and reads the argument run in its empty-quote branch (unescaping any backslash, as an
+unquoted `-c` payload does); the pipeline rule accepts a path prefix; and the pipeline input
+contributes its unquoted argument run alongside its quoted spans. Evidence: RED 7 failed -> GREEN
+457 passed (full tools suite 1393), the orchestrator's probe 17/17 through both engines, and three
+mutants held, one per mechanism.
+
+Everything the guard review produced is now closed. What remains open are two **pre-existing
+over-blocks** - an unanchored system-tree pattern that blocks a search merely naming it, and the
+quote-parity leak after an unwrapped unclosed quote. Both are nuisances recorded earlier in this
+archive, not security holes; closing them means rewriting how masking pairs quotes, which is a
+round of its own.
+
+### 2026-10-16 - The two pre-existing over-blocks closed (commit `e0f10c4`)
+
+Both engines now anchor the Windows delete family at command position, so a search, an echo or a
+commit message that merely NAMES one is no longer blocked while a real invocation still is; and
+masking pairs quotes escape-aware, so an unwrapped unclosed quote no longer shifts the spans and
+turns a data span into a command. The escape-aware rule is deliberately limited to the adjacency
+case: a strictly escape-aware pairing would have turned a pinned wipe into a miss, which the
+implementer measured before choosing.
+
+Verification: RED twelve parity failures plus the in-process test, GREEN 476 passed, the
+orchestrator's 18-case probe through both engines, and three mutants held (one anchor fails six
+tests, the other four, the parity rule three).
+
+Two process notes worth keeping. First, the worker contradicted the orchestrator's brief: the brief
+claimed the Kilo engine already behaved, and the worker measured that both engines blocked the
+naming forms, then anchored both - the asymmetry in the brief came from reading a probe column
+whose meaning had been mis-stated. Second, one of the orchestrator's mutants was mis-targeted (it
+dropped the wrong pattern's anchor) and reported "not pinned"; only re-pointing the mutation at the
+named pattern showed the corpus does pin it. A mutation that cannot fail is evidence about the
+mutation before it is evidence about the tests.
+
+### 2026-10-16 - The one-shot worker gained a fenced tool loop
+
+`tools/model_api.py` now runs a tool loop on request: `read_file` inside the repository with
+credential paths refused, `write_file` only inside an `--allow-dir`, and `run_command` with a pinned
+argv list, no shell, a program allowlist, and the harness guard's own destructive-command veto as a
+second fence. Every call is logged and `--transcript` keeps the whole exchange. One-shot mode is
+unchanged, so a brief-shaped task still costs one request.
+
+Validated on a real task: asked to verify the over-block commit by running the suite, it executed
+the corpus suite (476 passed), the secret scan (920 files clean) and garden (0 drift) in 12 steps
+and 151 seconds, and answered from that output - not from the commit message.
+
+Three defects surfaced while validating, all the orchestrator's: the tool-mapping branch advertised
+read-only tools, the allowlist parser rejected a comma list, and the first prompt let the model burn
+its step budget exploring instead of running the commands. Two of the worker's answers are worth
+keeping as the reference behaviour: "no execution tool available" and "VERDICT: FAIL - unverified,
+not demonstrated". It never claimed a verification it could not run.
+
+### 2026-10-16 - WSL is the viable confinement path; the Windows token is not
+
+G5 stopped on the Windows ACL restricted token because it breaks TLS (SEC_E_NO_CREDENTIALS) and
+every worker here calls an API. WSL2 on this machine does not have that defect: a plain `curl`
+inside it answers 200, unprivileged user namespaces are enabled (max_user_namespaces 63789), and
+`unshare` works. So the fence is built from namespaces and leaves networking alone on purpose.
+
+Shape, each part measured: `/tmp` is a private tmpfs and the workspace is bind-mounted there at
+`/tmp/work` (namespace root cannot create a directory at `/`); every Windows drive mount is
+overlaid with its own tmpfs, which denies writes to C: and F: - whereas `mount -o remount,ro /mnt`
+is not honoured for drvfs mounts and leaked a write into %TEMP%; `/home` and `/root` are self-bound
+read-only. Hiding all of `/mnt` was tried first and killed name resolution, because WSL keeps DNS
+and GUI plumbing under `/mnt/wsl` and `/mnt/wslg`, so the fence skips those.
+
+Wired as `model_api.py --sandbox wsl`: the argv still passes the program allowlist and the guard's
+veto, `python` maps to `python3`, and the timeout is longer for /mnt I/O. Verified end to end: a
+two-command tool loop inside the fence reported pytest 9.1.1 and ruff 0.17.1 in 10.9 seconds, with
+writes outside the workspace refused. WSL-side tooling was installed with `pip --user` (approved)
+and the fence adds `~/.local/bin` to PATH, which a non-interactive shell lacks.
+
+Open options, agreed but not started: docker (CLI present, daemon not running) and running dsh
+inside WSL to use its bwrap-based sandbox packages, which are inert on Windows.
+
+### 2026-10-16 - The /v1 stripping bug, and a note that accused projects of carrying harness debris
+
+`env_file.NORMALIZE_BASE_URLS` stripped a trailing `/v1` from `COMMANDCODE_BASE_URL`, but the
+generated provider config uses that variable verbatim (`"baseURL": "${COMMANDCODE_BASE_URL}"`) while
+it appends `/v1` only for `OPENAI_BASE_URL`. Every commandcode call through the OpenCode delegate
+therefore had the wrong endpoint. The A/B used one call: before the fix the CLI returned its unknown
+error, after it answered in 8.2 seconds. The guard is derived from ground truth rather than from
+memory - `tools/test_env_file.py` reads every templated `baseURL`, works out which variables the
+config appends `/v1` to, and asserts the list equals exactly those; a second test asserts the
+launcher derives every alias `env_file` derives.
+
+Two audit dead ends were closed on the way. A grep for `$env:NAME =` in `opencode-env.ps1` reported
+`DEEPSEEK_BASE_URL` missing, but lines 43-48 export every `.env` key through a generic loop, so
+nothing was missing and nearly a working file was "fixed". And `4.4.0` in `SPEC.md` against `4.3.1`
+in `.harness.lock` is documented in the SPEC itself as two axes - document version against engine
+version - not drift. A third alarm was a wrong path: the reference checkouts live in the parent
+`g_harness\reference`, not inside the repo.
+
+The deploy's upgrade note first decided "this target carries an earlier harness" from the mere
+existence of `SPEC.md`. That file is project-owned by the deploy's own test list, so any target
+keeping its own specification was told it carried harness debris - the same class of false claim the
+note exists to prevent. Detection is now by the marker the harness writes on the SPEC's first line,
+and the docs half matches the v4.1.0 doc set by exact name; only 22 of the 27 names are listed,
+because README.md, evaluation-report.md, capability-seams.md, code-review-checklist.md and
+defensive-patterns.md are names a project plausibly owns. Verified against the real v4.1.0 bytes
+copied into a scratch target: the note fires, names that spec and a genuine legacy doc, leaves
+`docs/README.md` alone, and deletes nothing.
+
+Decision recorded by the project owner (2026-10-16): the launcher logs out OpenCode's stored
+`freemodel` credential on every run, the delegate never touches that store, and the asymmetry stays
+as it is. No failure is measurable today because FreeModel currently resolves from the environment,
+so mirroring the logout would delete a credential the owner stored for no proven gain. If a delegate
+run ever reports Unauthorized for a freemodel model, this is the first thing to rule out.
+
+### 2026-10-16 - Consolidating on one GitHub repo, and what a force-push does and does not keep
+
+The owner's goal is a single canonical repo. The measurements that decided where it should live:
+`solo-code-com/Solo-Code-Harness` carries 3 stars and 1 fork plus a description, while
+`solo-code-com/g-harness` has none and an empty description. Stars, forks and watchers belong to the
+repository rather than to any branch, so rewriting `main` in the older repo preserves all of them -
+consolidating into the star-bearing repo is what keeps the rating, and moving to the newer repo
+would have left it behind. `meldkin/g-harness` and `vtgiang-dotcom/Solo-Code-Harness` turned out to
+be redirects of the same two repositories, confirmed by reading `git ls-remote` on each URL.
+
+Before any rewrite, the old `main` (`6f261bd`, 208 commits, none of them covered by the v4.2.0 tag)
+was fetched into `refs/remotes/oldharness/main` and pushed to the old repo as
+`archive/main-pre-g-harness`, an additive push. Tags `v4.1.0` and `v4.2.0` are untouched by a branch
+rewrite. The rewrite itself is the owner's to run: the permission guard rejects a force-push from
+the agent, and routing it through another runtime to evade that is forbidden, so the exact
+`--force-with-lease=main:<old-sha>` command was handed over with its expected verification numbers.
+
+`reference\Solo-Code-Harness-main` (896 files, 7.1 MB) was then deleted with explicit approval:
+`git grep` shows no tracked file references it, its content survives as the archived branch and the
+release tags, and the old commits are still in this repo's object database through the fetched ref.
+`reference\deepseek-harness-master` stays, because the dsh arm needs that checkout.
+
+### 2026-10-16 - Decision entries moved out of MEMORY.md (verbatim)
+
+- [decision] Antigravity headless `agy.exe` delegate re-established (2026-10-06);
+  runs through `tools/antigravity_delegate.py` (read-only default, writes need
+  `--allow-dir` + `--auto-approve` with a shared-state lock and scope audit), tiers
+  `gemini-3.8-flash-{low,medium,high}`. Quota rotation and auth details are in
+  `decisions-archive.md`.
+- [decision] Antigravity headless permission behavior (measured 2026-10-06): exit codes
+  and flag caveats are archived verbatim in `decisions-archive.md`.
+- [decision] OpenCode avoids duplicate skill mirrors and uses Claude-compatible
+  skills.
+- [decision] Codex lifecycle and guard behavior is launcher-based, because Codex
+  has no project hooks. Of the gateway's aliases only `gpt-5.6-terra` routes
+  reproducibly; the rest are unstable or dead — measurements and traps are in
+  `decisions-archive.md` (2026-09-14).
+- [decision] Subagent `ask` behaves as `allow` in headless runs (2026-10-07):
+  use explicit `allow`/`deny`, never `ask`; probe detail in `decisions-archive.md`.
+- [decision] Coverage (2026-10-07): the 13 files that started at 0.0% have tests and
+  raised baselines; detail in `decisions-archive.md`.
+- [decision] GUI worker console (2026-10-07): full detail in `decisions-archive.md`
+  (loopback-only stdlib web app in `tools/gui_server.py`, `.env` key NAMES only).
+- [decision] Codex worker arm (2026-10-07): full detail in `decisions-archive.md`
+  (read-only sandbox by default, brief in a file, post-run git status/diffstat).
+- [decision] Subagent seam implemented (2026-10-07): `tools/subagent_cli.py` provides
+  the Protocol in `tools/subagent_seam.py`; `write` is deliberately not advertised.
+  Version 4.3.0; full detail in `decisions-archive.md`.
+- [decision] Subagent reviewers: `read` + `edit`, no shell for `code-reviewer`
+  (2026-10-07); the garden checks behind it are in `decisions-archive.md`.
+- [decision] Worker confinement mechanism (2026-10-14): `tools/win_sandbox.py` —
+  Windows ACL restricted token, `--also-write` cấp thêm root ghi, `revert` gỡ ACE,
+  verify bằng `icacls`; hai gotcha coverage/budget ở `decisions-archive.md`.
+- [decision] G5 đóng ở nhánh restricted-token (2026-10-15): cơ chế chặn ghi đúng,
+  nhưng TLS fail ⇒ không bọc được worker gọi API; chi tiết + việc kế ở
+  `decisions-archive.md`.

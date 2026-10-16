@@ -1,0 +1,10 @@
+# Direct DeepSeek API. Set DEEPSEEK_API_KEY outside this file.
+- id: llm-deepseek
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
+    protocol: messages
+- insert:
+    - id: solo-policy
+      name: '@solo-code/dsh-solo-policy'
+    - id: solo-guidance
+      name: '@solo-code/dsh-solo-guidance'

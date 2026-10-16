@@ -21,7 +21,7 @@ High-signal context loaded at session start. Detailed history belongs in
 - [tech] Python 3.10+ stdlib runtime for `tools/` and `.github/scripts/`;
   pytest/ruff are dev tools. Kilo hooks use Node.js 18+.
 - [tech] Ruff config: `.ruff.toml`; secrets: `.gitleaks.toml`.
-- [tech] Codex CLI 0.154.0 (npm global) is a harness consumer: it reads
+- [tech] Codex CLI 0.160.0 (npm global) is a harness consumer: it reads
   `AGENTS.md` natively, so no `.codex/` engine mirror is generated. Launcher
   `codex-env.ps1`, metering `tools/codex_usage.py`.
 - [tech] SQLite shared state: `.solocode/shared-state.db`. Only `session_log`
@@ -50,51 +50,67 @@ High-signal context loaded at session start. Detailed history belongs in
 - [gotcha] Keep loaded memory under 8,000 chars. MOVE pruned material into
   `decisions-archive.md` verbatim — never silently delete it.
 - [gotcha] `.pytest_temp` cleanup can race on Windows; rerun pytest if needed.
+- [gotcha] `check_lint_budget` honours `.gitignore` only when the tree is a git
+  repo. Without `.git/`, ruff still scans `.pytest_temp*/` and the count overshoots
+  the budget (measured 49 vs 45 on the pristine tree). Run `git init` before
+  trusting the gate.
 
 ## Decisions
-- [decision] Antigravity headless `agy.exe` delegate **re-established** after
-  the retirement rationale was disproven: the account lockouts were a
-  Google-side update bug, not bot-traffic flags from `agy.exe`; the accounts
-  were reopened and the CLI was never implicated (2026-10-06). Worker runs
-  through `tools/antigravity_delegate.py` — read-only by default, writes need
-  `--allow-dir` + `--auto-approve` with a shared-state directory lock and
-  post-run scope audit. Model is chosen by task complexity via the distinct ids
-  `gemini-3.8-flash-{low,medium,high}`. Quota rotation is manual: `agy.exe`
-  uses the machine-level Antigravity Google account and has no per-run account
-  flag; switch account with `/logout` then re-sign-in, check quota with `/usage`,
-  and resume with `--conversation <id>` or `--continue-latest`. A Gemini API key
-  (`modelProvider: "gemini"` + `GEMINI_API_KEY`) is the headless alternative.
-  Auth/settings details and doc links are in `decisions-archive.md`.
-- [decision] Antigravity headless permission behavior (measured 2026-10-06 on
-  `agy.exe` 1.2.9): a plain read-only run cannot answer the `command` permission
-  prompt, so `run_command` is auto-denied while `result.status` still says
-  `SUCCESS` with `denied_actions` populated. The wrapper now inspects
-  `denied_actions` and per-tool `ERROR` events and exits **5** (empty output
-  exits **2**) instead of a silent success. New `--allow-tools` flag grants
-  read/execute tool use without a write scope (no directory lock, no scope
-  audit); it is mutually exclusive with `--auto-approve`, `--allow-dir`, and
-  `--no-guardrail`. `view_file` works read-only with an absolute path;
-  `grep_search`/`list_dir` usage was unreliable at the low model tier.
-- [decision] Claude launchers default to full mode; `--bare` is explicit
-  degraded mode.
-- [decision] OpenCode avoids duplicate skill mirrors and uses Claude-compatible
-  skills.
-- [decision] Codex lifecycle and guard behavior is launcher-based, because Codex
-  has no project hooks. Of the gateway's aliases only `gpt-5.6-terra` routes
-  reproducibly; the rest are unstable or dead — measurements and traps are in
-  `decisions-archive.md` (2026-09-14).
-- [decision] Codex write path: verified that `Set-Content` is not blocked by
-  Codex CLI; earlier failure was caused by compound commands ending in
-  `Remove-Item -Force` triggering `exec_policy.rs` `rm -f` heuristic under
-  `approval_policy = "never"`. Added verified write path to `tools/codex_guard.py`
-  (`--write` flag with secret scanning and shared state file locking) alongside
-  native `apply_patch` (2026-09-25).
 - [decision] CommandCode model ids are verified against
-  `GET {COMMANDCODE_BASE_URL}/models`, never from memory: the catalog drifts and
-  the old `api-providers.md` advertised nine ids that no longer resolve. Each
-  CommandCode consumer declares models separately, so a new model needs one entry
-  in `tools/opencode_engine.py` `_PROVIDER_MODELS` (OpenCode), `.vscode/settings.json`
-  (Copilot), and `~/.config/kilo/kilo.jsonc` (Kilo). Kilo refs use the full
-  upstream id (`commandcode/deepseek/deepseek-v4-pro`) while OpenCode refs use the
-  harness key (`commandcode/deepseek-v4-pro`) — both correct for their dialect.
-  `context_length` comes from the `/models` response, not the file. (2026-09-28)
+  `GET {COMMANDCODE_BASE_URL}/models`, never from memory. Each consumer declares models
+  separately: `_PROVIDER_MODELS` in `tools/opencode_engine.py` (OpenCode uses the harness
+  key `commandcode/deepseek-v4-pro`), `.vscode/settings.json` (Copilot), and
+  `~/.config/kilo/kilo.jsonc` (Kilo uses the full upstream id
+  `commandcode/deepseek/deepseek-v4-pro`). `context_length` comes from the response, not
+  the file. (2026-09-28; catalog 80 model on 2026-10-16)
+- [decision] Guard hardening (2026-10-07): 33 -> 41 destructive patterns, 8 holes closed,
+  list in `decisions-archive.md`. (2026-10-16) re-measured: 5 of 7 already fixed; 3 of the 4
+  left closed (+3 Windows-root patterns -> 44, README synced; quoted spans holding a
+  separator read as data). The 4th (secrets in a Kilo command unscanned) stays open: fixing
+  it needs `hooks.json` or a JS secret list. Pipeline drills `bcfa6bd`+`c2e174f` closed the
+  wrapper gap and round 2's 2 regressions; 10 quoting gaps remain (archive). Pytest timeout
+  120 -> 300s.
+- [decision] dsh worker verified (2026-10-07, re-verified 2026-10-16 `DSH_ARM_OK`): detail and
+  prerequisites in `decisions-archive.md`.
+- [decision] Pipeline 4 vai trò (2026-10-16): Jev (agent trên **model JEV**
+  `openrouter/jev-router`) điều phối; **Codex** ra đề bài + **verify** (`gpt-6.1-sol`,
+  effort `medium`, đổi bằng `--model`/`--effort`); **DeepSeek V4.1 Flash** (OpenCode CLI,
+  + `dsh`) code sâu; **Gemini 3.8 Flash** (Antigravity CLI) việc nhanh nhẹ. Fallback:
+  Codex không ổn định → DeepSeek viết brief + thẩm định lại Gemini. Jev `edit: deny` và
+  wrapper chạy agent này **không `--auto`** để deny có hiệu lực. Gotcha: timeout mặc định
+  của wrapper opencode/agy là **120s** → job dài bị giết oan (đã nâng 900/600); `.ps1` tải
+  về bị mark-of-the-web → phải `Unblock-File`. Catalog **80 model / 4 provider**.
+- [decision] G7 control plane (2026-10-15): `session_registry.py` +
+  `session_control.py` (`list`/`send`/`interrupt`/`prune`); cả 5 delegate đã ghi
+  registry (seam `Popen`→`record_start(pid)`→`kill_tree` khi timeout). **Race thật**:
+  interrupt bị ghi đè thành `exited` → claim `interrupting` trước khi giết.
+  `send_message` chỉ cho phiên khai báo kênh (hiện chưa có).
+- [decision] Docs gộp (2026-10-16): 8 báo cáo lịch sử (upgrade-summary, audit-08-15,
+  audit-09-04, 5 file cross-review) vào
+  `docs/archive-harness-upgrade-review-and-audit-reports-2026.md` verbatim; 8 file gốc
+  thành con trỏ. Giữ standalone `deepseek-harness-upgrade-acceptance.md` +
+  `audit-2026-09-11.md`. garden.py bỏ qua docs trong `docs/` mà tên chứa review/report.
+- [decision] Parity launcher ↔ delegate về biến môi trường (2026-10-16): chỉ cắt `/v1` ở biến mà
+  config sinh ra **thêm** `/v1` — hiện chỉ `OPENAI_BASE_URL`; `COMMANDCODE_BASE_URL` và
+  `DEEPSEEK_BASE_URL` dùng **nguyên văn**. Cắt `/v1` của commandcode từng làm mọi call delegate
+  hỏng (A/B cùng call: `Unknown error` → `OK` 8.2s). `tools/test_env_file.py` suy luật **từ chính**
+  `.opencode/opencode.json`, nên thêm provider có template `/v1` là test đỏ ngay. Ghi chú: launcher
+  xuất **mọi** key `.env` bằng vòng lặp chung nên nó và `env_file.py` đã ngang nhau — audit chỉ grep
+  `$env:NAME =` sẽ báo thiếu biến oan.
+- [decision] Nhận diện "harness cũ" ở target (2026-10-16): theo **nội dung** cho `SPEC.md` (marker
+  harness ghi ở dòng đầu) và theo **đúng tên** cho `docs/`; **không bao giờ** theo sự tồn tại hay
+  tên đơn thuần — `SPEC.md` và `docs/` là project-owned (deploy không được xoá). Chỉ liệt kê 22/27
+  tên tài liệu v4.1.0; bỏ `README.md`, `evaluation-report.md`, `capability-seams.md`,
+  `code-review-checklist.md`, `defensive-patterns.md` vì dự án cũng có thể sở hữu tên đó. Note chỉ
+  **báo tên**, không xoá gì.
+- [decision] Bất đối xứng store credential (2026-10-16, chủ dự án quyết "để nguyên"):
+  `opencode-env.ps1` đăng xuất credential `freemodel` đã lưu mỗi lần chạy (key lưu sẵn che key
+  `.env`), `tools/opencode_delegate.py` **không** đụng store. Hôm nay chưa đo được lỗi vì FreeModel
+  đang lấy từ env → không mirror, chỉ ghi nhận; nếu về sau delegate báo Unauthorized với freemodel
+  thì đây là nguyên nhân đầu tiên cần loại trừ.
+- [decision] Hợp nhất một nguồn GitHub (2026-10-16, chủ dự án quyết): repo chính là
+  `solo-code-com/Solo-Code-Harness` — giữ 3 sao + 1 fork, vì sao/rating gắn với **repo** chứ không
+  gắn branch nên ghi đè `main` không làm mất. Mốc cũ `6f261bd` (208 commit) đã đẩy lên đó dưới nhánh
+  `archive/main-pre-g-harness`; tag `v4.1.0`/`v4.2.0` giữ nguyên. Lệnh ghi đè do chủ dự án tự chạy
+  (guard chặn agent force-push). Bản `reference\Solo-Code-Harness-main` đã xoá — không file nào
+  tham chiếu nó, object cũ vẫn ở `.git` local qua ref `oldharness/main`.

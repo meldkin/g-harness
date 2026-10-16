@@ -40,8 +40,12 @@ HIGH_SENSITIVITY_SECRETS: list[tuple[str, re.Pattern[str]]] = [
 
 def scan_diff() -> list[str]:
     try:
+        # `git diff HEAD` is empty immediately after `git commit` (the working
+        # tree now equals HEAD), so the advertised "alert after commit" could
+        # never fire for the case it was written for. `git show` inspects the
+        # commit that was just created.
         result = subprocess.run(
-            ["git", "diff", "HEAD"],
+            ["git", "show", "--unified=0", "--format=", "HEAD"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -55,11 +59,14 @@ def scan_diff() -> list[str]:
     for i, line in enumerate(result.stdout.split("\n"), 1):
         if not line.startswith("+") or line.startswith("+++"):
             continue
+        # Report the pattern name and line number only -- never line content.
+        # The previous version redacted just the FIRST matching pattern, then
+        # printed the rest of the line (120 chars), so a line carrying two secret
+        # types leaked the second one verbatim to stderr, and stderr lands in the
+        # session transcript.
         for name, pattern in HIGH_SENSITIVITY_SECRETS:
             if pattern.search(line):
-                sanitized = pattern.sub("[REDACTED]", line)[:120]
-                findings.append(f"  [{name}] line {i}: {sanitized}")
-                break
+                findings.append(f"  [{name}] line {i}")
     return findings
 
 

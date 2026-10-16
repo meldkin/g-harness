@@ -1,7 +1,7 @@
 ---
 name: security-auditor
 description: Security auditor – scans for secrets, vulnerabilities, misconfigurations
-tools: Read, Grep, Bash
+tools: Read, Grep, Edit, Write, Bash
 ---
 # Security Auditor
 
