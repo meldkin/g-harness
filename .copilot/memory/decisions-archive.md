@@ -980,3 +980,21 @@ whose meaning had been mis-stated. Second, one of the orchestrator's mutants was
 dropped the wrong pattern's anchor) and reported "not pinned"; only re-pointing the mutation at the
 named pattern showed the corpus does pin it. A mutation that cannot fail is evidence about the
 mutation before it is evidence about the tests.
+
+### 2026-10-16 - The one-shot worker gained a fenced tool loop
+
+`tools/model_api.py` now runs a tool loop on request: `read_file` inside the repository with
+credential paths refused, `write_file` only inside an `--allow-dir`, and `run_command` with a pinned
+argv list, no shell, a program allowlist, and the harness guard's own destructive-command veto as a
+second fence. Every call is logged and `--transcript` keeps the whole exchange. One-shot mode is
+unchanged, so a brief-shaped task still costs one request.
+
+Validated on a real task: asked to verify the over-block commit by running the suite, it executed
+the corpus suite (476 passed), the secret scan (920 files clean) and garden (0 drift) in 12 steps
+and 151 seconds, and answered from that output - not from the commit message.
+
+Three defects surfaced while validating, all the orchestrator's: the tool-mapping branch advertised
+read-only tools, the allowlist parser rejected a comma list, and the first prompt let the model burn
+its step budget exploring instead of running the commands. Two of the worker's answers are worth
+keeping as the reference behaviour: "no execution tool available" and "VERDICT: FAIL - unverified,
+not demonstrated". It never claimed a verification it could not run.
