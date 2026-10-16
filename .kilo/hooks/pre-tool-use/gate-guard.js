@@ -235,11 +235,122 @@ const SAFE_ALTERNATIVES = [
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+// ─── Shell dialects (how a quoted payload ends) ─────────────────────────────
+// Port of guard.py's DIALECTS. `escape` is the character that escapes the
+// closing quote (null when the quote is literal -- POSIX single quotes never
+// escape), `doubled` marks a doubled quote as the in-string quote (`""` in
+// PowerShell and cmd) rather than the end of the payload, and `escapable` is
+// the set of characters `escape` may escape (null for "any"). PowerShell's
+// backtick and cmd's `^` escape the closing quote and nothing else, so their
+// set holds only `"` -- decoding every escape rewrote `-Recurse`t-Force` into
+// `-Recurset-Force` and let a wipe through. POSIX double quotes are the narrow
+// case: the
+// shell removes a backslash only before `$`, a backtick, `"`, `\` or a
+// newline, so `\m` stays a literal backslash-m. Decoding it into `m` was the
+// round-4 over-block that made `bash -c "r\m -rf /"` look like a wipe. Every
+// shell/quote pair the wrapper pattern below can produce has an entry, so a
+// lookup cannot fail open on a shape a caller forgot to add.
+const POSIX_DOUBLE_ESCAPES = new Set(['$', '`', '"', '\\', '\n']);
+// The Windows shells escape the closing quote with their own escape character
+// (a backtick-quote in PowerShell, `^"` in cmd) and NOTHING else -- `t is a
+// tab, a real word separator, so decoding it glues two flag words into one and
+// hides the wipe from the patterns. Only the quote character may be consumed.
+const WIN_QUOTE_ESCAPE = new Set(['"']);
+const DIALECTS = {
+  'bash:single': { escape: null, doubled: false, escapable: null },
+  'sh:single': { escape: null, doubled: false, escapable: null },
+  'bash:double': { escape: '\\', doubled: false, escapable: POSIX_DOUBLE_ESCAPES },
+  'sh:double': { escape: '\\', doubled: false, escapable: POSIX_DOUBLE_ESCAPES },
+  'cmd:single': { escape: null, doubled: false, escapable: null },
+  'cmd:double': { escape: '^', doubled: true, escapable: WIN_QUOTE_ESCAPE },
+  'powershell:single': { escape: null, doubled: true, escapable: null },
+  'powershell:double': { escape: '`', doubled: true, escapable: WIN_QUOTE_ESCAPE },
+  'pwsh:single': { escape: null, doubled: true, escapable: null },
+  'pwsh:double': { escape: '`', doubled: true, escapable: WIN_QUOTE_ESCAPE },
+};
+
+// The wrappers whose payload is executed, at command position. `bq` is the
+// opening quote when there is one; a `-c` payload may also be UNQUOTED
+// (`sh -c rm\ -rf\ /`), in which case the group matches empty and the payload
+// is the argument run. The `^` anchor replaces Python's match(text, index) --
+// this is matched against text.slice(index).
+const WRAPPER_RE = /^(?:(?:(?:sudo\s+)?(?:env|nohup|nice|command|time)\s+)*(?:sudo\s+)?(?<shell>bash|sh)\s+-c\s+(?<bq>['"]|(?=\S))|(?<win>powershell|pwsh|cmd)(?:\.exe)?\s+(?:[-/]\S+\s+)*(?<wq>['"]))/i;
+
+// Port of guard.py's dialect_of().
+function dialectOf(shell, quote) {
+  return DIALECTS[`${shell.toLowerCase()}:${quote === "'" ? 'single' : 'double'}`];
+}
+
+// Port of guard.py's unescape_payload(): remove one level of a dialect's
+// escapes (`\X` -> `X`), which is what makes a nested wrapper written with
+// escaped quotes match, and what the shell itself does to an unquoted `-c`
+// argument before it runs the words. Only a pair the shell really treats as
+// an escape is consumed (`escapable`, or null for "any"): a POSIX double quote
+// escapes just `$`, a backtick, `"`, `\` and a newline, so `\m` is left alone
+// while `\"` still decodes for the nested-wrapper case.
+function unescapePayload(payload, escape, escapable) {
+  if (!escape) return payload;
+  let out = '';
+  let index = 0;
+  while (index < payload.length) {
+    if (
+      payload[index] === escape &&
+      index + 1 < payload.length &&
+      (!escapable || escapable.has(payload[index + 1]))
+    ) {
+      out += payload[index + 1];
+      index += 2;
+      continue;
+    }
+    out += payload[index];
+    index += 1;
+  }
+  return out;
+}
+
+// Port of guard.py's find_closing_quote(): [end, escapedAt], or null when no
+// closing quote can be located for that dialect (the caller must then leave the
+// text alone rather than guess where the payload ends).
+function findClosingQuote(text, start, quote, escape, doubled) {
+  let index = start;
+  let escapedAt = -1;
+  while (index < text.length) {
+    const char = text[index];
+    if (
+      doubled &&
+      char === quote &&
+      index + 1 < text.length &&
+      text[index + 1] === quote
+    ) {
+      index += 2;
+      continue;
+    }
+    if (char === quote) {
+      if (escape === null) return [index, escapedAt];
+      let run = 0;
+      let cursor = index - 1;
+      while (cursor >= start && text[cursor] === escape) {
+        run += 1;
+        cursor -= 1;
+      }
+      if (run % 2 === 0) return [index, escapedAt];
+      if (escapedAt < 0) escapedAt = index;
+    }
+    index += 1;
+  }
+  return null;
+}
+
 // Port of guard.py's unwrap_command_wrappers(): a quoted payload after a
 // `bash|sh -c` or a Windows `powershell|pwsh|cmd` wrapper is executed, so its
 // separators are real command separators. The wrapper is unwrapped only where
 // the quote state and the command position both agree it is executable, so
-// search data that merely NAMES one stays untouched.
+// search data that merely NAMES one stays untouched. Round 10 reads the
+// payload's end with the shell's own lexicon, unescapes the payload before
+// scanning it, unescapes an unquoted `-c` argument, and bails PER WRAPPER
+// instead of per command -- the old all-or-nothing bail stripped the
+// unwrapping from a clean wrapper later on the same line. Any ambiguity still
+// leaves the text exactly as it came in.
 function unwrapCommandWrappers(command) {
   if (!command || typeof command !== 'string') return '';
 
@@ -250,86 +361,113 @@ function unwrapCommandWrappers(command) {
     let commandPosition = true;
 
     while (index < text.length) {
-      const char = text[index];
-
       if (quote === null && commandPosition) {
-        const match = text.slice(index).match(
-          /^(?:(?:(?:sudo\s+)?(?:env|nohup|nice|command|time)\s+)*(?:sudo\s+)?(?:bash|sh)\s+-c\s+(['"])|(?:powershell|pwsh|cmd)(?:\.exe)?\s+(?:[-/]\S+\s+)*(['"]))/i
-        );
+        const match = text.slice(index).match(WRAPPER_RE);
         if (match) {
-          const wrapperQuote = match[1] || match[2];
+          const shell = (match.groups.shell || match.groups.win).toLowerCase();
+          const wrapperQuote = match.groups.bq || match.groups.wq;
           const payloadStart = index + match[0].length;
-          let payloadEnd = payloadStart;
-          let ambiguous = false;
-          let innerQuote = null;
-          while (payloadEnd < text.length) {
-            const charAtEnd = text[payloadEnd];
-            // A doubled quote is the Windows escape (`""hi""`) and hides where
-            // the payload really ends, so it must be tested before the plain
-            // closing-quote test below -- that test breaks on the FIRST quote
-            // of the pair.
-            if (
-              wrapperQuote === '"' &&
-              charAtEnd === '"' &&
-              payloadEnd + 1 < text.length &&
-              text[payloadEnd + 1] === '"'
-            ) {
-              ambiguous = true;
-              break;
-            }
-            if (charAtEnd === wrapperQuote) {
-              // Count the whole contiguous run of backslashes before the
-              // candidate: odd means the quote is escaped and the payload has
-              // not ended, so the parse is ambiguous.
-              let backslashes = 0;
-              let cursor = payloadEnd - 1;
-              while (cursor >= payloadStart && text[cursor] === '\\') {
-                backslashes += 1;
-                cursor -= 1;
+
+          if (wrapperQuote) {
+            const dialect = dialectOf(shell, wrapperQuote);
+            const found = findClosingQuote(
+              text,
+              payloadStart,
+              wrapperQuote,
+              dialect.escape,
+              dialect.doubled
+            );
+            if (found) {
+              const payloadEnd = found[0];
+              const escapedAt = found[1];
+              const escapedSeparator =
+                escapedAt >= 0 && /[;&|\n]/.test(text.slice(escapedAt, payloadEnd));
+              // A closing quote another backslash follows is the `'\''`
+              // concatenation: the payload text is only half of what the shell
+              // sees, so do not read it.
+              const trailingEscape =
+                payloadEnd + 1 < text.length && text[payloadEnd + 1] === '\\';
+              if (!escapedSeparator && !trailingEscape) {
+                let body = unescapePayload(
+                  text.slice(payloadStart, payloadEnd),
+                  dialect.escape,
+                  dialect.escapable
+                );
+                // A single-quoted shell has no escape character, so its
+                // in-string quote is the doubled pair. findClosingQuote only
+                // SKIPS that pair, so it still reaches the patterns as two
+                // balanced empty spans and the text between them reads in
+                // command position. Halve it to the one quote the shell sees.
+                // The double-quoted dialects keep `""` for their payload-end
+                // walk: rewriting it there could let a leading `""` mask a
+                // separator.
+                if (dialect.doubled && dialect.escape === null) {
+                  body = body.split(wrapperQuote + wrapperQuote).join(wrapperQuote);
+                }
+                out += rewrite(body);
+                index = payloadEnd + 1;
+                commandPosition = false;
+                continue;
               }
-              if (backslashes % 2) {
-                ambiguous = true;
-                break;
-              }
-              if (innerQuote === null) break;
             }
-            if (
-              (charAtEnd === "'" || charAtEnd === '"') &&
-              charAtEnd !== wrapperQuote
-            ) {
-              innerQuote = innerQuote === charAtEnd ? null : charAtEnd;
-            }
-            payloadEnd += 1;
-          }
-          if (
-            !ambiguous &&
-            payloadEnd < text.length &&
-            innerQuote === null &&
-            (payloadEnd + 1 === text.length || text[payloadEnd + 1] !== '\\')
-          ) {
-            out += rewrite(text.slice(payloadStart, payloadEnd));
-            index = payloadEnd + 1;
+          } else {
+            // An unquoted `-c` argument: the shell removes the backslash
+            // escapes before the words reach `sh`, so `sh -c rm\ -rf\ /` runs
+            // `rm -rf /`. The argument run ends at the next separator.
+            let runEnd = payloadStart;
+            while (runEnd < text.length && !';&|\n'.includes(text[runEnd])) runEnd += 1;
+            // An unquoted `-c` argument escapes ANY next character, so its
+            // escapable set is null.
+            out += rewrite(
+              unescapePayload(text.slice(payloadStart, runEnd), '\\', null)
+            );
+            index = runEnd;
             commandPosition = false;
             continue;
           }
-          // Ambiguous: hand the text back untouched so the masking path
-          // decides, rather than unwrapping on a guess.
-          return text;
+
+          // Per-wrapper bail: keep this wrapper verbatim and carry on after its
+          // opening quote, so a clean wrapper later on the line is still
+          // unwrapped. Resuming with no quote state is what lets the scan reach
+          // it; the text itself is left as it came in.
+          out += text.slice(index, payloadStart);
+          index = payloadStart;
+          commandPosition = false;
+          continue;
         }
       }
 
+      const char = text[index];
+      out += char;
+
       if (quote === null) {
-        if (char === "'" || char === '"') quote = char;
-        else if (';&|\n'.includes(char)) commandPosition = true;
-        else if (!/\s/.test(char)) commandPosition = false;
-      } else if (
-        char === quote &&
-        (index === 0 || text[index - 1] !== '\\')
-      ) {
-        quote = null;
+        // A quote behind a backslash is a literal quote in POSIX, so it must
+        // not open a span: `bash -c "echo C:\"; bash ...` would otherwise
+        // swallow the rest of the line and hide the wrapper.
+        if (
+          (char === "'" || char === '"') &&
+          (index === 0 || text[index - 1] !== '\\')
+        ) {
+          quote = char;
+        } else if (';&|\n'.includes(char)) {
+          commandPosition = true;
+        } else if (!/\s/.test(char)) {
+          commandPosition = false;
+        }
+      } else if (char === quote) {
+        if (quote === "'") {
+          quote = null;
+        } else {
+          let run = 0;
+          let cursor = index - 1;
+          while (cursor >= 0 && text[cursor] === '\\') {
+            run += 1;
+            cursor -= 1;
+          }
+          if (run % 2 === 0) quote = null;
+        }
       }
 
-      out += char;
       index += 1;
     }
 
@@ -401,6 +539,92 @@ function checkPatterns(patterns, command) {
   return null;
 }
 
+// ─── Text a command runs without naming it ──────────────────────────────────
+// Ports of guard.py's _EVAL_ARGUMENT / _PIPE_INTO_SHELL / quoted_spans() /
+// executable_payloads(): `eval` runs its quoted argument, and a pipeline stage
+// that IS a shell runs the text the input side PRINTS, so the quoted spans
+// there are the script. Both read the MASKED text, so quoted search data stays
+// data (`rg "echo 'rm -rf /' | bash" .` never fires).
+const EVAL_ARGUMENT = /(?:^|[;&|\n]\s*)eval\s+(?<q>['"])/gi;
+const PIPE_INTO_SHELL =
+  /(?:^|[;&\n])(?<input>[^;&\n]*?)\|\s*(?:(?:sudo|env)\s+(?:\w+=\S*\s+)*)?(?:bash|sh|zsh|ksh|pwsh|powershell)(?:\.exe)?(?![\w.-])/gi;
+
+// Bound on the recursion into embedded payloads, so a pathological nesting
+// cannot walk forever.
+const MAX_PAYLOAD_DEPTH = 4;
+
+// Port of guard.py's quoted_spans(): the contents of each quoted span, with the
+// quote characters removed.
+function quotedSpans(text) {
+  const spans = [];
+  let index = 0;
+  while (index < text.length) {
+    const char = text[index];
+    if (char !== "'" && char !== '"') {
+      index += 1;
+      continue;
+    }
+    const end = text.indexOf(char, index + 1);
+    if (end === -1) break;
+    spans.push(text.slice(index + 1, end));
+    index = end + 1;
+  }
+  return spans;
+}
+
+// Port of guard.py's executable_payloads().
+function executablePayloads(masked) {
+  const payloads = [];
+  for (const match of masked.matchAll(EVAL_ARGUMENT)) {
+    const quote = match.groups.q;
+    const dialect = dialectOf('bash', quote);
+    const start = match.index + match[0].length;
+    const found = findClosingQuote(
+      masked,
+      start,
+      quote,
+      dialect.escape,
+      dialect.doubled
+    );
+    if (found) {
+      payloads.push(
+        unescapePayload(
+          masked.slice(start, found[0]),
+          dialect.escape,
+          dialect.escapable
+        )
+      );
+    }
+  }
+  for (const match of masked.matchAll(PIPE_INTO_SHELL)) {
+    payloads.push(...quotedSpans(match.groups.input));
+  }
+  return payloads;
+}
+
+// Port of guard.py's find_destructive(): the same two candidates, plus the
+// recursion into the text a command runs without naming it, bounded by
+// MAX_PAYLOAD_DEPTH. Both engines must reach the same verdict on the same
+// command, so this has to stay a line-for-line mirror.
+function findDestructive(command, depth = 0) {
+  const unwrapped = unwrapCommandWrappers(command);
+  const normalized = normalizeCommand(unwrapped);
+  for (const raw of [unwrapped, normalized]) {
+    if (!raw) continue;
+    const candidate = maskSeparatorQuotes(raw);
+    const hit = checkPatterns(BLOCK_PATTERNS, candidate);
+    if (hit) return hit;
+    if (depth < MAX_PAYLOAD_DEPTH) {
+      for (const payload of executablePayloads(candidate)) {
+        if (!payload) continue;
+        const nested = findDestructive(payload, depth + 1);
+        if (nested) return nested;
+      }
+    }
+  }
+  return null;
+}
+
 function checkAlternatives(command) {
   return SAFE_ALTERNATIVES
     .filter(({ cmd }) => command.includes(cmd))
@@ -454,15 +678,11 @@ process.stdin.on('end', () => {
     const command = toolInput.command || toolInput.CommandLine || toolInput.cmd || toolInput.commandLine || '';
 
     // 1. BLOCK destructive patterns (raw, then unwrapped -- mirrors guard.py's
-    //    find_destructive, which unwraps before masking so a wrapper's quoted
-    //    payload is read as commands, not as search data). Separator-bearing
-    //    quoted spans are blanked first so a search pattern or a commit message
-    //    that merely NAMES a command is not read as one.
-    const unwrapped = unwrapCommandWrappers(command);
-    const normalized = normalizeCommand(unwrapped);
-    const blocked =
-      checkPatterns(BLOCK_PATTERNS, maskSeparatorQuotes(unwrapped)) ||
-      checkPatterns(BLOCK_PATTERNS, maskSeparatorQuotes(normalized));
+    //    find_destructive: unwrap and normalise, mask separator-bearing quoted
+    //    spans so a search pattern or a commit message that merely NAMES a
+    //    command is not read as one, then recurse into the text a command runs
+    //    without naming it).
+    const blocked = findDestructive(command);
     if (blocked) {
       const alts = checkAlternatives(command);
       process.stderr.write(

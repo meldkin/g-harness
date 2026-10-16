@@ -44,7 +44,7 @@ from typing import Any
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-DEFAULT_MODEL = "commandcode/deepseek-v4-pro"
+DEFAULT_MODEL = "commandcode/deepseek-v4.1-flash"
 # The orchestrator runs WITHOUT --auto: that flag auto-approves past its
 # `edit: deny`, so the deny only holds once the flag is gone (measured 2026-10-16:
 # a write landed with the jev agent selected and --auto in play).
@@ -90,6 +90,20 @@ def _load_sibling(module_name: str):
     if tools_dir not in sys.path:
         sys.path.insert(0, tools_dir)
     return importlib.import_module(module_name)
+
+
+def _load_project_env() -> None:
+    """Export the project `.env` (with the launcher's aliases) before spawning the CLI.
+
+    The delegate spawns OpenCode directly, so the launcher never runs and anything it would
+    derive from `.env` -- `FREEMODEL_API_KEY` from `OPENAI_API_KEY`, for one -- is missing.
+    """
+    _load_sibling("env_file").load_project_env()
+
+
+def _model_override(role: str) -> str | None:
+    """The `.env` override for this role's default model, if the operator set one."""
+    return _load_sibling("env_file").model_override(role)
 
 
 def _error_result(error: str) -> dict[str, Any]:
@@ -410,7 +424,9 @@ def main(argv: list[str] | None = None) -> int:
     # ── Resolve the model ──
     # With an agent and no explicit model, send no `--model` at all so the agent's
     # own configuration decides (the `jev` agent runs on openrouter/jev-router);
-    # otherwise the harness default applies.
+    # otherwise the harness default applies -- and a `.env` override wins over that
+    # default, so a provider outage is one line in `.env`, not a code edit.
+    _load_project_env()
     if args.free:
         model = FREE_MODEL
     elif args.model:
@@ -418,7 +434,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.agent:
         model = None
     else:
-        model = DEFAULT_MODEL
+        model = _model_override("opencode") or DEFAULT_MODEL
 
     # ── Prepend guardrail unless disabled ──
     prompt = args.prompt

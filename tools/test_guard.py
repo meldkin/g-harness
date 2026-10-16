@@ -128,9 +128,8 @@ def test_unwrap_command_wrappers():
         == "echo hi && rm -rf /; echo done"
     )
     # An ambiguous parse returns the text untouched so the masking path decides:
-    # a candidate quote behind an odd backslash run, one followed by a backslash
-    # (the POSIX `'\''` concatenation), and a doubled quote in a PowerShell
-    # payload.
+    # a candidate quote behind an odd backslash run, and one followed by a
+    # backslash (the POSIX `'\''` concatenation).
     assert (
         guard.unwrap_command_wrappers('bash -c "echo C:\\"; rm -rf / && echo "done"')
         == 'bash -c "echo C:\\"; rm -rf / && echo "done"'
@@ -139,14 +138,22 @@ def test_unwrap_command_wrappers():
         guard.unwrap_command_wrappers(r"""bash -c 'echo '\''hi'\''; rm -rf /'""")
         == r"""bash -c 'echo '\''hi'\''; rm -rf /'"""
     )
+    # A doubled quote is PowerShell's in-string quote, not the payload's end, so
+    # this one unwraps now (round 10): treating `""` as the terminator was gap 2.
     assert (
         guard.unwrap_command_wrappers(
             'powershell -Command "Write-Host ""hi""; '
             + 'Remove-Item -Recurse -Force C:\\data"'
         )
-        == 'powershell -Command "Write-Host ""hi""; '
-        + 'Remove-Item -Recurse -Force C:\\data"'
+        == 'Write-Host ""hi""; ' + "Remove-Item -Recurse -Force C:\\data"
     )
+    # A nested wrapper whose inner quote is backslash-escaped only matches once
+    # the payload is unescaped for its dialect (gap 3).
+    assert (
+        guard.unwrap_command_wrappers('bash -c "bash -c \\"rm -rf /\\""') == "rm -rf /"
+    )
+    # An unquoted `-c` payload is unescaped the way the shell does it (gap 9).
+    assert guard.unwrap_command_wrappers(r"sh -c rm\ -rf\ /") == "rm -rf /"
 
 
 def test_quoted_system_trees_and_chained_payloads():
@@ -162,6 +169,160 @@ def test_quoted_system_trees_and_chained_payloads():
     assert guard.find_destructive("rg \"rm -rf '/etc'\" .") is None
 
 
+def test_dialects_and_embedded_payloads():
+    """Round-10: the nine quoting gaps, each with its search twin.
+
+    A payload's end is read with the shell's own lexicon, `eval`'s argument and
+    a piped shell's input are executable text, and a wrapper with an unquoted
+    `-c` argument is unescaped the way the shell does. The twin pins the other
+    direction: the same text inside a search is data.
+    """
+    # 1-6: the payload-end lexicon, per shell family.
+    assert (
+        guard.find_destructive("bash -c \"echo C:\\\"; bash -c 'rm -rf /; echo done'")
+        is not None
+    )
+    assert (
+        guard.find_destructive(
+            'powershell -Command "Write-Host ""hi""; Remove-Item -Recurse -Force C:\\data"'
+        )
+        is not None
+    )
+    assert (
+        guard.find_destructive('echo hi && bash -c "bash -c \\"rm -rf /\\""')
+        is not None
+    )
+    assert (
+        guard.find_destructive('echo hi && cmd /c "echo Don\'t & rd /s /q C:\\Windows"')
+        is not None
+    )
+    assert (
+        guard.find_destructive("echo hi && bash -c 'rm -rf /; echo C:\\'") is not None
+    )
+    assert (
+        guard.find_destructive('echo hi && cmd /c "rd /s /q C:\\data & echo done\\"')
+        is not None
+    )
+    # 7-9: text a command executes without appearing as a command.
+    assert guard.find_destructive("eval 'rm -rf /'") is not None
+    assert guard.find_destructive("echo 'rm -rf /' | bash") is not None
+    assert guard.find_destructive(r"sh -c rm\ -rf\ /") is not None
+
+    # The twins: the same text, named inside a search.
+    assert (
+        guard.find_destructive(
+            "rg 'bash -c \"echo C:\\\"; bash -c 'rm -rf /; echo done'' ."
+        )
+        is None
+    )
+    assert (
+        guard.find_destructive(
+            'rg \'powershell -Command "Write-Host ""hi""; '
+            "Remove-Item -Recurse -Force C:\\data\"' ."
+        )
+        is None
+    )
+    assert (
+        guard.find_destructive('rg \'echo hi && bash -c "bash -c \\"rm -rf /\\""\' .')
+        is None
+    )
+    assert (
+        guard.find_destructive(
+            """rg 'echo hi && cmd /c "echo Don''t & rd /s /q C:\\Windows"' ."""
+        )
+        is None
+    )
+    assert (
+        guard.find_destructive(r"""rg "echo hi && bash -c 'rm -rf /; echo C:\'" .""")
+        is None
+    )
+    assert (
+        guard.find_destructive(
+            """rg 'echo hi && cmd /c "rd /s /q C:\\data & echo done\\"' ."""
+        )
+        is None
+    )
+    assert guard.find_destructive("""rg "eval 'rm -rf /'" .""") is None
+    assert guard.find_destructive("""rg "echo 'rm -rf /' | bash" .""") is None
+    assert guard.find_destructive(r"""rg 'sh -c rm\ -rf\ /' .""") is None
+
+
+def test_unescape_payload_is_dialect_aware():
+    r"""Round-4: consume `escape + char` only where the dialect escapes it.
+
+    `unescape_payload` removed every `\X`, but a POSIX shell strips a backslash
+    only before `$`, a backtick, `"`, `\` or a newline. Decoding `\m` and `\ `
+    turned `bash -c "r\m -rf /"` -- a command the shell would fail to run --
+    into `rm -rf /` and blocked harmless work; the same decode is what keeps the
+    nested escaped wrapper blocked.
+    """
+    posix = guard.DIALECTS["bash:double"][2]
+    # A pseudo-escape survives: the false-block fix.
+    assert guard.unescape_payload(r"r\m -rf /", "\\", posix) == r"r\m -rf /"
+    # A real escape is still consumed, which the nested wrapper depends on.
+    assert guard.unescape_payload('a\\"b', "\\", posix) == 'a"b'
+    assert guard.unescape_payload("a\\\\b", "\\", posix) == "a\\b"
+    # The backtick dialect escapes the next character generally: unchanged.
+    assert guard.unescape_payload("a`b", "`", None) == "ab"
+    # No escape character (POSIX single quotes): the payload is returned as-is.
+    assert guard.unescape_payload(r"a\mb", None, None) == r"a\mb"
+
+
+def test_payload_unescaping_stays_scoped_to_the_quote():
+    r"""Two measured regressions of the dialect scanner, in one place.
+
+    The payload is unescaped before the block patterns read it, so an
+    over-broad decode rewrites text the shell would run DIFFERENTLY:
+
+    - `` Remove-Item`t-Recurse`t-Force `` runs as three words (`` `t `` is a
+      tab, a real separator), so the wipe must stay BLOCKED; decoding every
+      escape turned it into `Remove-Itemt-Recurset-Force`, a name no pattern
+      matches, and the wipe was allowed.
+    - `'Write-Host ''data; rm -rf /'''`: the `''` is PowerShell's in-string
+      quote (one literal quote), so the whole -Command argument is data and the
+      command is ALLOWED; the doubled pair reached the patterns as two balanced
+      empty spans, putting `rm` in command position.
+
+    Only the quote character is unescaped. Every other escape is left as
+    written, and the doubled in-string quote is halved for the single-quoted
+    shells, which have no escape character to decode it.
+    """
+    ps_double = guard.DIALECTS["powershell:double"][2]
+    cmd_double = guard.DIALECTS["cmd:double"][2]
+    # A non-quote escape is literal text: the payload reaches the patterns as
+    # written, so `Remove-Item`t-Recurse`t-Force` is one word, not the wipe.
+    assert guard.unescape_payload("a`tb", "`", ps_double) == "a`tb"
+    assert guard.unescape_payload("a^tb", "^", cmd_double) == "a^tb"
+    assert (
+        guard.unwrap_command_wrappers('powershell -Command "Write-Host `t x"')
+        == "Write-Host `t x"
+    )
+    assert (
+        guard.find_destructive(
+            'powershell -Command "Remove-Item`t-Recurse`t-Force C:\\data"'
+        )
+        is not None
+    )
+    # The quote escape itself is still consumed -- the nested-wrapper case needs
+    # it, and that is the ONLY escape the restriction keeps.
+    assert guard.unescape_payload('a`"b', "`", ps_double) == 'a"b'
+    assert guard.unescape_payload('a^"b', "^", cmd_double) == 'a"b'
+    # A PowerShell in-string quote is one quote to the shell, so the argument is
+    # data: the wipe that is NOT there must not be reported.
+    assert (
+        guard.find_destructive("powershell -Command 'Write-Host ''data; rm -rf /'''")
+        is None
+    )
+    # ...while a real wipe in exactly that shape still blocks.
+    assert (
+        guard.find_destructive(
+            "powershell -Command 'Write-Host ''x''; "
+            "Remove-Item -Recurse -Force C:\\data'"
+        )
+        is not None
+    )
+
+
 def run_self_test():
     """Run basic validation tests."""
     print("Guard hook self-test...")
@@ -173,6 +334,12 @@ def run_self_test():
         ("Destructive scan masking", test_destructive_scan_ignores_data_in_quotes),
         ("Wrapper unwrapping", test_unwrap_command_wrappers),
         ("Quoted system trees", test_quoted_system_trees_and_chained_payloads),
+        ("Dialects and embedded payloads", test_dialects_and_embedded_payloads),
+        ("Dialect-aware unescaping", test_unescape_payload_is_dialect_aware),
+        (
+            "Quote-only payload unescaping",
+            test_payload_unescaping_stays_scoped_to_the_quote,
+        ),
     ]
 
     passed = 0

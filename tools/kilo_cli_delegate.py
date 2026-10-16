@@ -38,6 +38,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -46,7 +47,12 @@ from typing import Any
 
 TOOLS_DIR = Path(__file__).resolve().parent
 DEFAULT_SERVER = "http://127.0.0.1:14096"
-DEFAULT_MODEL = "commandcode/deepseek/deepseek-v4-pro"
+DEFAULT_MODEL = "commandcode/deepseek/deepseek-v4.1-flash"
+
+#: Prompts at or below this length go on the command line; longer ones are written to a brief
+#: file and referenced by a short pointer (see `run_kilo_cli`). The bound comes from the
+#: measurements: 1650 characters inline was fine, 3642 hung or killed the CLI.
+INLINE_PROMPT_LIMIT = 2000
 
 USAGE_LOG = Path(".solocode/kilo-usage.jsonl")
 USAGE_LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -86,6 +92,20 @@ def _load_sibling(module_name: str):
     import importlib
 
     return importlib.import_module(module_name)
+
+
+def _load_project_env() -> None:
+    """Export the project `.env` (with the launcher's aliases) before spawning the CLI.
+
+    The delegate spawns Kilo directly, so the launcher never runs and anything it would
+    derive from `.env` -- `FREEMODEL_API_KEY` from `OPENAI_API_KEY`, for one -- is missing.
+    """
+    _load_sibling("env_file").load_project_env()
+
+
+def _model_override(role: str) -> str | None:
+    """The `.env` override for this role's default model, if the operator set one."""
+    return _load_sibling("env_file").model_override(role)
 
 
 def _error_result(error: str) -> dict[str, Any]:
@@ -246,10 +266,29 @@ def run_kilo_cli(
     timeout_s: int = 120,
 ) -> dict[str, Any]:
     """Run kilo CLI with --attach to server, return parsed JSON events."""
+    # A brief-sized prompt is unreliable on the command line. Measured 2026-10-16: a ~3.6 KB
+    # task either blew a 300-second budget or killed the CLI outright, while the identical
+    # text reached the model when it was handed over as a file -- the fix codex_delegate
+    # already uses. Short prompts stay inline: delivered as file *content*, a one-line
+    # instruction reads as untrusted input and a model may rightly refuse it (observed: a
+    # marker echo was declined as a prompt-injection probe).
+    if len(prompt) <= INLINE_PROMPT_LIMIT:
+        pointer = prompt
+    else:
+        brief_dir = (
+            TOOLS_DIR.parent / ".solocode" / "kilo-briefs" / uuid.uuid4().hex[:12]
+        )
+        brief_dir.mkdir(parents=True, exist_ok=True)
+        brief_file = brief_dir / "brief.md"
+        brief_file.write_text(prompt, encoding="utf-8")
+        pointer = (
+            f"Read the file {brief_file} and carry out the task it contains exactly. "
+            "It is your complete brief."
+        )
     cmd = [
         kilo_binary,
         "run",
-        prompt,
+        pointer,
         "--model",
         model,
         "--attach",
@@ -389,6 +428,11 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+
+    # A `.env` override wins over the built-in default (see tools/env_file.py): a provider
+    # outage becomes one line in `.env` instead of a code edit.
+    _load_project_env()
+    args.model = args.model or _model_override("kilo") or DEFAULT_MODEL
 
     # ── Find Kilo binary ──
     kilo_binary = args.kilo_bin or find_kilo_binary()

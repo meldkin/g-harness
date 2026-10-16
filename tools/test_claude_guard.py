@@ -211,6 +211,39 @@ BLOCKED_COMMANDS = [
     # then left behind was masked as search data, erasing the wipe.
     'bash -c "echo C:\\"; rm -rf / && echo "done"',
     r"""bash -c 'echo '\''hi'\''; rm -rf /'""",
+    # Round-10: the nine pre-existing quoting gaps, closed by the per-shell
+    # dialect table and the per-wrapper bail (drill 4). Every one of these was
+    # measured ALLOWED at HEAD in both engines; each is a command that really
+    # executes the wipe. The three that the brief's own code did not close are
+    # gaps 3, 8 and 9 (an escaped inner wrapper, a pipe into a shell, and an
+    # unquoted `-c` payload).
+    #   1 the bail was per command, so an ambiguous wrapper stripped the
+    #     unwrapping from a clean wrapper later on the same line;
+    #   2 `""` is PowerShell's in-string quote, not the payload's end;
+    #   3 the inner wrapper's quote is backslash-escaped;
+    #   4 `cmd.exe` has no single-quote quoting, so an apostrophe must not open
+    #     an inner quote;
+    #   5 POSIX single quotes are literal, so a backslash never escapes them;
+    #   6 a backslash is a path separator in `cmd`, not an escape;
+    #   7 the argument of `eval` executes, but `eval` is not a wrapper;
+    #   8 a shell does not run the input command of a pipe, it runs the text
+    #     that command prints, so the quoted spans on the input side are the
+    #     script;
+    #   9 the shell strips the escaped spaces before `sh -c` sees its words.
+    "bash -c \"echo C:\\\"; bash -c 'rm -rf /; echo done'",
+    'powershell -Command "Write-Host ""hi""; Remove-Item -Recurse -Force C:\\data"',
+    'echo hi && bash -c "bash -c \\"rm -rf /\\""',
+    'echo hi && cmd /c "echo Don\'t & rd /s /q C:\\Windows"',
+    "echo hi && bash -c 'rm -rf /; echo C:\\'",
+    'echo hi && cmd /c "rd /s /q C:\\data & echo done\\"',
+    "eval 'rm -rf /'",
+    "echo 'rm -rf /' | bash",
+    r"sh -c rm\ -rf\ /",
+    # The dialect scanner over-decoded a non-quote escape: `t is a TAB in
+    # PowerShell, a real word separator, so decoding it glued the two flag words
+    # into a name no pattern matches and let the wipe through. Restricting the
+    # decode to the quote character must put this back to BLOCKED.
+    'powershell -Command "Remove-Item`t-Recurse`t-Force C:\\data"',
 ]
 
 
@@ -347,6 +380,32 @@ SAFE_COMMANDS = [
     # search merely NAMES them, so closing the miss must not close the search.
     'rg \'bash -c "echo C:\\"; rm -rf / && echo "done"\' .',
     r"""rg "bash -c 'echo '\''hi'\''; rm -rf /'" .""",
+    # Round-10 over-block guards, one per newly closed gap: the same text inside
+    # a search is data, not an executable command. This is the line that keeps
+    # the dialect table and the `eval`/pipe rules from over-blocking the way
+    # people search for the exact command they are investigating.
+    "rg 'bash -c \"echo C:\\\"; bash -c 'rm -rf /; echo done'' .",
+    'rg \'powershell -Command "Write-Host ""hi""; Remove-Item -Recurse -Force C:\\data"\' .',
+    'rg \'echo hi && bash -c "bash -c \\"rm -rf /\\""\' .',
+    """rg 'echo hi && cmd /c "echo Don''t & rd /s /q C:\\Windows"' .""",
+    r"""rg "echo hi && bash -c 'rm -rf /; echo C:\'" .""",
+    """rg 'echo hi && cmd /c "rd /s /q C:\\data & echo done\\"' .""",
+    """rg "eval 'rm -rf /'" .""",
+    """rg "echo 'rm -rf /' | bash" .""",
+    r"""rg 'sh -c rm\ -rf\ /' .""",
+    # Round-4 (this fix): `unescape_payload` removed every `\X`, but a POSIX
+    # shell only strips a backslash before `$`, a backtick, `"`, `\` or a
+    # newline. So `r\m` and `rm\ ` name a command the shell would fail to run,
+    # yet the scanner decoded them into `rm` and blocked harmless work. An
+    # over-block is the worse failure: a guard that blocks ordinary work gets
+    # switched off. Both were measured BLOCKED in both engines before the fix.
+    r'bash -c "r\m -rf /"',
+    r'bash -c "rm\ -rf /"',
+    # A PowerShell in-string quote. The `''` inside a single-quoted -Command
+    # argument is one literal quote, so the whole argument is data and PowerShell
+    # only prints it. The scanner kept the doubled quote, so the POSIX re-read
+    # closed the span and put `rm` in command position.
+    "powershell -Command 'Write-Host ''data; rm -rf /'''",
 ]
 
 

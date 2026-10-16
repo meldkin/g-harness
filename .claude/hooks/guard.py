@@ -425,16 +425,225 @@ PROTECTED_FILES: frozenset[str] = frozenset(
 )
 
 
+# ─── Shell dialects (how a quoted payload ends, per shell family) ───────────
+# One lexicon cannot read POSIX, `cmd.exe` and PowerShell quoting at once, so
+# the payload-end walk is dialect-aware. Keyed `<shell>:<single|double>`, with
+# an entry for every shell/quote pair the wrapper pattern below can produce, so
+# the lookup can never fail open on a shape a caller forgot to add.
+#
+#   escape    -- the character that escapes the closing quote, or None when the
+#                quote is literal (POSIX single quotes: a backslash never
+#                escapes them, which is why the old parity rule misfired).
+#   doubled   -- a doubled quote is the in-string quote (`""` in PowerShell and
+#                `cmd`) and hides where the payload really ends.
+#   escapable -- the characters `escape` may escape, or None for "any". POSIX
+#                double quotes are the narrow case: the shell removes a
+#                backslash only before `$`, a backtick, `"`, `\` or a newline,
+#                so `\m` is a literal backslash-m. Decoding it into `m` was the
+#                round-4 over-block that made `bash -c "r\m -rf /"` look like a
+#                wipe. PowerShell's backtick and `cmd`'s `^` escape the closing
+#                quote and nothing else, so their set holds only `"`: decoding
+#                every escape rewrote `-Recurse`t-Force` into `-Recurset-Force`
+#                and let a wipe through.
+_POSIX_DOUBLE_ESCAPES: frozenset[str] = frozenset('$`"\\\n')
+# The Windows shells escape the closing quote with their own escape character
+# (`` `" `` in PowerShell, `^"` in cmd) and NOTHING else -- `` `t `` is a tab,
+# a real word separator, so decoding it glues two flag words into one and hides
+# the wipe from the patterns. Only the quote character may be consumed.
+_QUOTE_ONLY_ESCAPES: frozenset[str] = frozenset('"')
+DIALECTS: dict[str, tuple[str | None, bool, frozenset[str] | None]] = {
+    "bash:single": (None, False, None),
+    "sh:single": (None, False, None),
+    "bash:double": ("\\", False, _POSIX_DOUBLE_ESCAPES),
+    "sh:double": ("\\", False, _POSIX_DOUBLE_ESCAPES),
+    "cmd:single": (None, False, None),
+    "cmd:double": ("^", True, _QUOTE_ONLY_ESCAPES),
+    "powershell:single": (None, True, None),
+    "powershell:double": ("`", True, _QUOTE_ONLY_ESCAPES),
+    "pwsh:single": (None, True, None),
+    "pwsh:double": ("`", True, _QUOTE_ONLY_ESCAPES),
+}
+
+# The wrappers whose payload is executed, at command position: a POSIX
+# `bash|sh -c` (with the composition prefixes `_RM_CMD` also accepts) or a
+# Windows `powershell|pwsh|cmd` with its switches. `bq` is the opening quote
+# when there is one; a `-c` payload may also be UNQUOTED (`sh -c rm\ -rf\ /`),
+# in which case the group matches empty and the payload is the argument run.
+_WRAPPER_RE = re.compile(
+    r"(?:(?:(?:sudo\s+)?(?:env|nohup|nice|command|time)\s+)*(?:sudo\s+)?"
+    r"(?P<shell>bash|sh)\s+-c\s+(?P<bq>['\"]|(?=\S))"
+    r"|(?P<win>powershell|pwsh|cmd)(?:\.exe)?\s+"
+    r"(?:[-/]\S+\s+)*(?P<wq>['\"]))",
+    re.I,
+)
+
+
+def dialect_of(
+    shell: str, quote: str
+) -> tuple[str | None, bool, frozenset[str] | None]:
+    """The payload-end lexicon for a shell family and its opening quote."""
+    style = "single" if quote == "'" else "double"
+    return DIALECTS[f"{shell.lower()}:{style}"]
+
+
+def unescape_payload(
+    payload: str, escape: str | None, escapable: frozenset[str] | None
+) -> str:
+    r"""Remove one level of a dialect's escapes (`\X` -> `X`).
+
+    A wrapper's payload is written for the shell that will run it, so its
+    escapes have to come off before the payload is read as commands: the inner
+    wrapper in `bash -c "bash -c \"rm -rf /\""` only matches once `\"` is `"`.
+
+    Only a pair the shell really treats as an escape is consumed (`escapable`,
+    or None for "any"). A POSIX double quote escapes just `$`, a backtick, `"`,
+    `\` and a newline, so `\m` is left alone -- stripping it turned
+    `bash -c "r\m -rf /"`, which runs a command named `r\m`, into a wipe that
+    was never there. An unquoted `-c` payload passes None: there the shell
+    strips a backslash before any character.
+    """
+    if not escape:
+        return payload
+    out: list[str] = []
+    index = 0
+    while index < len(payload):
+        if (
+            payload[index] == escape
+            and index + 1 < len(payload)
+            and (escapable is None or payload[index + 1] in escapable)
+        ):
+            out.append(payload[index + 1])
+            index += 2
+            continue
+        out.append(payload[index])
+        index += 1
+    return "".join(out)
+
+
+def find_closing_quote(
+    text: str, start: int, quote: str, escape: str | None, doubled: bool
+) -> tuple[int, int] | None:
+    """Locate a payload's closing quote by the dialect's own rules.
+
+    Returns `(end, escaped_at)`: the index of the closing quote, and the index
+    of the first quote the payload had escaped (`-1` when there was none).
+    `None` means no closing quote could be located, and the caller must then
+    leave the text alone rather than guess where the payload ends.
+    """
+    index = start
+    escaped_at = -1
+    while index < len(text):
+        char = text[index]
+        if (
+            doubled
+            and char == quote
+            and index + 1 < len(text)
+            and text[index + 1] == quote
+        ):
+            index += 2
+            continue
+        if char == quote:
+            if escape is None:
+                return index, escaped_at
+            run = 0
+            cursor = index - 1
+            while cursor >= start and text[cursor] == escape:
+                run += 1
+                cursor -= 1
+            if run % 2 == 0:
+                return index, escaped_at
+            if escaped_at < 0:
+                escaped_at = index
+        index += 1
+    return None
+
+
+# ─── Text a command runs without naming it ──────────────────────────────────
+# `eval` is not a wrapper, it runs its quoted argument. Read from the MASKED
+# text so an `eval` that is itself inside quoted search data is not at command
+# position and stays data (`rg "eval 'rm -rf /'" .` is a search).
+_EVAL_ARGUMENT = re.compile(r"(?:^|[;&|\n]\s*)eval\s+(?P<q>['\"])", re.I)
+
+# A stage of a pipeline that IS a shell does not run the input command, it runs
+# the text that command PRINTS. The quoted spans on the input side are
+# therefore the script: `echo 'rm -rf /' | bash` executes `rm -rf /`. Masked
+# first for the same reason as `eval`: in `rg "echo 'rm -rf /' | bash" .` the
+# whole expression is one quoted span, the mask erases it, and the rule never
+# fires.
+_PIPE_INTO_SHELL = re.compile(
+    r"(?:^|[;&\n])(?P<input>[^;&\n]*?)\|\s*(?:(?:sudo|env)\s+(?:\w+=\S*\s+)*)?"
+    r"(?:bash|sh|zsh|ksh|pwsh|powershell)(?:\.exe)?(?![\w.-])",
+    re.I,
+)
+
+#: Bound on the recursion into embedded payloads, so a pathological nesting
+#: cannot walk forever.
+MAX_PAYLOAD_DEPTH = 4
+
+
+def quoted_spans(text: str) -> list[str]:
+    """The contents of each quoted span, with the quote characters removed."""
+    spans: list[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char not in "'\"":
+            index += 1
+            continue
+        end = text.find(char, index + 1)
+        if end == -1:
+            break
+        spans.append(text[index + 1 : end])
+        index = end + 1
+    return spans
+
+
+def executable_payloads(masked: str) -> list[str]:
+    """Command text a masked command runs without naming it.
+
+    Two shapes: the argument of an executable `eval`, and the input side of a
+    pipeline that reaches a shell. Both are read from the MASKED command, so
+    the data-vs-command decision is made once, by the mask, and neither rule can
+    read quoted search data as a script.
+    """
+    payloads: list[str] = []
+    for match in _EVAL_ARGUMENT.finditer(masked):
+        escape, doubled, escapable = dialect_of("bash", match.group("q"))
+        found = find_closing_quote(
+            masked, match.end(), match.group("q"), escape, doubled
+        )
+        if found:
+            payloads.append(
+                unescape_payload(masked[match.end() : found[0]], escape, escapable)
+            )
+    for match in _PIPE_INTO_SHELL.finditer(masked):
+        payloads.extend(quoted_spans(match.group("input")))
+    return payloads
+
+
 def unwrap_command_wrappers(command: str) -> str:
-    """Remove executable wrapper payloads only at command positions.
+    """Replace an executable wrapper's payload with the text it actually runs.
 
     A quoted payload after `bash|sh -c` or a Windows `powershell|pwsh|cmd`
     wrapper is executed, so its separators are real command separators and its
     content must reach the block patterns. Search data that merely NAMES such a
-    wrapper is untouched: the wrapper is only unwrapped where the quote state
-    and the command position both agree it is executable. When the payload's
-    closing quote cannot be located unambiguously the text is returned
-    unchanged, so `mask_separator_quotes` still decides.
+    wrapper is untouched: a wrapper is unwrapped only where the quote state and
+    the command position both agree it is executable.
+
+    Round 10 changed three things. The payload's end is read with the shell's
+    own lexicon (see `DIALECTS`); the payload is unescaped before it is scanned,
+    so a nested wrapper written with escaped quotes still matches; and an
+    unquoted `-c` argument is unescaped too, because the shell strips those
+    escapes before the words run. An ambiguous wrapper is now skipped ALONE --
+    the earlier per-command bail handed the whole line back, which silently
+    stripped the unwrapping from a clean wrapper later on the same line.
+
+    "Ambiguous" still means the text is left untouched rather than guessed at.
+    Three shapes are ambiguous: no closing quote for the dialect, a quote the
+    payload escaped with a separator before the payload really ends (the two
+    readings disagree about whether that separator is executable), and a
+    payload whose closing quote is followed by a backslash (the POSIX `'\\''`
+    concatenation, which the masking path has to see whole).
     """
     if not command:
         return ""
@@ -446,84 +655,107 @@ def unwrap_command_wrappers(command: str) -> str:
         command_position = True
 
         while index < len(text):
-            char = text[index]
-
             if quote is None and command_position:
-                match = re.match(
-                    r"(?:(?:sudo\s+)?(?:env|nohup|nice|command|time)\s+)*"
-                    r"(?:sudo\s+)?(?:bash|sh)\s+-c\s+(['\"])"
-                    r"|(?:powershell|pwsh|cmd)(?:\.exe)?\s+"
-                    r"(?:[-/]\S+\s+)*(['\"])",
-                    text[index:],
-                    re.I,
-                )
+                match = _WRAPPER_RE.match(text, index)
                 if match:
-                    wrapper_quote = match.group(1) or match.group(2)
-                    payload_start = index + match.end()
-                    payload_end = payload_start
-                    ambiguous = False
-                    inner_quote: str | None = None
-                    while payload_end < len(text):
-                        char_at_end = text[payload_end]
-                        # A doubled quote is the Windows escape (`""hi""`) and
-                        # hides where the payload really ends, so it must be
-                        # tested before the plain closing-quote test below --
-                        # that test breaks on the FIRST quote of the pair.
-                        if (
-                            wrapper_quote == '"'
-                            and char_at_end == '"'
-                            and payload_end + 1 < len(text)
-                            and text[payload_end + 1] == '"'
-                        ):
-                            ambiguous = True
-                            break
-                        if char_at_end == wrapper_quote:
-                            # Count the whole contiguous run of backslashes before
-                            # the candidate: odd means the quote is escaped and the
-                            # payload has not ended, so the parse is ambiguous.
-                            backslashes = 0
-                            cursor = payload_end - 1
-                            while cursor >= payload_start and text[cursor] == "\\":
-                                backslashes += 1
-                                cursor -= 1
-                            if backslashes % 2:
-                                ambiguous = True
-                                break
-                            if inner_quote is None:
-                                break
-                        if char_at_end in "'\"" and char_at_end != wrapper_quote:
-                            inner_quote = (
-                                None if inner_quote == char_at_end else char_at_end
-                            )
-                        payload_end += 1
-                    if (
-                        not ambiguous
-                        and payload_end < len(text)
-                        and inner_quote is None
-                        and (
-                            payload_end + 1 == len(text)
-                            or text[payload_end + 1] != "\\"
+                    shell = (match.group("shell") or match.group("win")).lower()
+                    wrapper_quote = match.group("bq") or match.group("wq")
+                    payload_start = match.end()
+
+                    if wrapper_quote:
+                        escape, doubled, escapable = dialect_of(shell, wrapper_quote)
+                        found = find_closing_quote(
+                            text, payload_start, wrapper_quote, escape, doubled
                         )
-                    ):
-                        out.append(rewrite(text[payload_start:payload_end]))
-                        index = payload_end + 1
+                        if found:
+                            payload_end, escaped_at = found
+                            escaped_separator = escaped_at >= 0 and any(
+                                separator in text[escaped_at:payload_end]
+                                for separator in ";&|\n"
+                            )
+                            # A closing quote another backslash follows is the
+                            # `'\''` concatenation: the payload text is only
+                            # half of what the shell sees, so do not read it.
+                            trailing_escape = (
+                                payload_end + 1 < len(text)
+                                and text[payload_end + 1] == "\\"
+                            )
+                            if not escaped_separator and not trailing_escape:
+                                body = unescape_payload(
+                                    text[payload_start:payload_end],
+                                    escape,
+                                    escapable,
+                                )
+                                # A single-quoted shell has no escape
+                                # character, so its in-string quote is the
+                                # doubled pair. `find_closing_quote` only
+                                # SKIPS that pair, so it still reaches the
+                                # patterns as two balanced empty spans and the
+                                # text between them reads in command position.
+                                # Halve it to the one quote the shell sees. The
+                                # double-quoted dialects keep `""` for the
+                                # payload-end walk: rewriting it there could let
+                                # a leading `""` mask a separator.
+                                if doubled and escape is None:
+                                    body = body.replace(
+                                        wrapper_quote + wrapper_quote,
+                                        wrapper_quote,
+                                    )
+                                out.append(rewrite(body))
+                                index = payload_end + 1
+                                command_position = False
+                                continue
+                    else:
+                        # An unquoted `-c` argument. `sh -c rm\ -rf\ /` runs
+                        # `rm -rf /`, because the shell removes the backslash
+                        # escapes before the words reach `sh`. The argument run
+                        # ends at the next separator.
+                        run_end = payload_start
+                        while run_end < len(text) and text[run_end] not in ";&|\n":
+                            run_end += 1
+                        # An unquoted `-c` argument escapes ANY next
+                        # character, so its escapable set is None.
+                        run = unescape_payload(text[payload_start:run_end], "\\", None)
+                        out.append(rewrite(run))
+                        index = run_end
                         command_position = False
                         continue
-                    # Ambiguous: hand the text back untouched so the masking path
-                    # decides, rather than unwrapping on a guess.
-                    return text
+
+                    # Per-wrapper bail: keep this wrapper verbatim and carry on
+                    # after its opening quote, so a clean wrapper later on the
+                    # line is still unwrapped. Resuming with no quote state is
+                    # what lets the scan reach that later wrapper; the text
+                    # itself is left exactly as it came in.
+                    out.append(text[index:payload_start])
+                    index = payload_start
+                    command_position = False
+                    continue
+
+            char = text[index]
+            out.append(char)
 
             if quote is None:
-                if char in "'\"":
+                # A quote behind a backslash is a literal quote in POSIX, so it
+                # must not open a span: `bash -c "echo C:\"; bash ...` would
+                # otherwise swallow the rest of the line and hide the wrapper.
+                if char in "'\"" and (index == 0 or text[index - 1] != "\\"):
                     quote = char
                 elif char in ";&|\n":
                     command_position = True
                 elif not char.isspace():
                     command_position = False
-            elif char == quote and (index == 0 or text[index - 1] != "\\"):
-                quote = None
+            elif char == quote:
+                if quote == "'":
+                    quote = None
+                else:
+                    run = 0
+                    cursor = index - 1
+                    while cursor >= 0 and text[cursor] == "\\":
+                        run += 1
+                        cursor -= 1
+                    if run % 2 == 0:
+                        quote = None
 
-            out.append(char)
             index += 1
 
         return "".join(out)
@@ -578,7 +810,14 @@ def mask_separator_quotes(command: str) -> str:
     return "".join(out)
 
 
-def find_destructive(command: str) -> str | None:
+def find_destructive(command: str, depth: int = 0) -> str | None:
+    """Name the destructive pattern a command matches, or None.
+
+    `depth` bounds the recursion into the text a command runs without naming it
+    (an `eval` argument, the input side of a pipeline into a shell), so a
+    deliberately nested command still reaches the block patterns but cannot
+    walk forever.
+    """
     unwrapped = unwrap_command_wrappers(command)
     normalized = normalize_command(unwrapped)
     for raw in (unwrapped, normalized):
@@ -588,6 +827,13 @@ def find_destructive(command: str) -> str | None:
         for name, pattern in BLOCK_PATTERNS:
             if pattern.search(candidate):
                 return name
+        if depth < MAX_PAYLOAD_DEPTH:
+            for payload in executable_payloads(candidate):
+                if not payload:
+                    continue
+                hit = find_destructive(payload, depth + 1)
+                if hit:
+                    return hit
     return None
 
 
