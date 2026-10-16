@@ -39,7 +39,7 @@ const RM_CMD = '(?:^|[;&|\\n]\\s*|\\bxargs\\s+(?:-\\S+\\s+)*|\\b(?:sudo|env|nice
 // PowerShell/cmd counterpart of command position, with the wrappers that run a
 // nested command: `rg 'Remove-Item x -Recurse -Force' .` must stay allowed, since
 // that text only names the invocation.
-const PS_CMD = '(?:^|[;&|\\n]\\s*|(?:powershell|pwsh|cmd)(?:\\.exe)?\\s+(?:-\\S+\\s+)*[\'"]?\\s*)';
+const PS_CMD = '(?:^|[;&|\\n]\\s*|(?:powershell|pwsh|cmd)(?:\\.exe)?\\s+(?:[-/]\\S+\\s+)*[\'"]?\\s*)';
 // At least one destructive flag (`+` on a flag+separator pair): a flagless `rm`
 // cannot remove a directory, and matching zero flags made `rm *.tmp` and
 // `rm /tmp/test.pid` look like recursive wipes. A short bundle may mix in benign

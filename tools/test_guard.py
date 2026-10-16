@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Guard Hook Test Suite - validates safety patterns"""
+
 import sys
 from pathlib import Path
 
@@ -12,17 +13,43 @@ def test_normalize_command():
     assert guard.normalize_command("sudo ls") == "ls"
     assert guard.normalize_command("env FOO=bar ls") == "ls"
 
+
 def test_protected_files():
     """Test protected config files list."""
     assert ".ruff.toml" in guard.PROTECTED_FILES
     assert "eslint.config.js" in guard.PROTECTED_FILES
     assert "biome.json" in guard.PROTECTED_FILES
 
+
 def test_executor_mode():
     """Test executor mode exemptions."""
     assert guard.executor_mode_exempt(".solocode/executor-mode")
     assert guard.executor_mode_exempt(".gemini/antigravity/handoff/inbox/task.md")
     assert not guard.executor_mode_exempt("tools/test.py")
+
+
+def test_mask_separator_quotes():
+    """A quoted span holding a separator is data, not a command boundary."""
+    assert guard.mask_separator_quotes("rg 'echo x; diskpart' .") == "rg '' ."
+    assert guard.mask_separator_quotes('rg "a|b" .') == "rg '' ."
+    # No separator inside the quotes, so the text must survive: `rm -rf '/'`
+    # depends on the quoted root still reaching the pattern.
+    assert guard.mask_separator_quotes("rm -rf '/'") == "rm -rf '/'"
+    # An unbalanced quote passes through rather than swallowing the tail.
+    assert guard.mask_separator_quotes("echo 'unclosed; tail") == "echo 'unclosed; tail"
+
+
+def test_destructive_scan_ignores_data_in_quotes():
+    """find_destructive reads the masked text, so naming a command stays allowed."""
+    assert guard.find_destructive("rg 'echo x; diskpart' .") is None
+    assert guard.find_destructive("rg 'Remove-Item x -Recurse -Force' .") is None
+    assert guard.find_destructive("rm -rf /") is not None
+    assert guard.find_destructive("Remove-Item C:/ -Recurse") is not None
+    assert (
+        guard.find_destructive('cmd /c "Remove-Item -Recurse -Force C:\\\\data"')
+        is not None
+    )
+
 
 def run_self_test():
     """Run basic validation tests."""
@@ -31,6 +58,8 @@ def run_self_test():
         ("Command normalization", test_normalize_command),
         ("Protected files", test_protected_files),
         ("Executor mode", test_executor_mode),
+        ("Separator-aware masking", test_mask_separator_quotes),
+        ("Destructive scan masking", test_destructive_scan_ignores_data_in_quotes),
     ]
 
     passed = 0
@@ -44,6 +73,7 @@ def run_self_test():
 
     print(f"\n{passed}/{len(tests)} passed")
     return passed == len(tests)
+
 
 if __name__ == "__main__":
     sys.exit(0 if run_self_test() else 1)

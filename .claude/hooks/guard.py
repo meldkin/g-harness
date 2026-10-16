@@ -38,7 +38,9 @@ _RM_CMD = r"(?:^|[;&|\n]\s*|\bxargs\s+(?:-\S+\s+)*|\b(?:sudo|env|nice|nohup|comm
 # nested command. `rg 'Remove-Item x -Recurse -Force' .` must stay allowed: that
 # text merely NAMES the invocation, and an over-block teaches people to switch the
 # guard off, which is worse than a miss.
-_PS_CMD = r"(?:^|[;&|\n]\s*|(?:powershell|pwsh|cmd)(?:\.exe)?\s+(?:-\S+\s+)*['\"]?\s*)"
+_PS_CMD = (
+    r"(?:^|[;&|\n]\s*|(?:powershell|pwsh|cmd)(?:\.exe)?\s+(?:[-/]\S+\s+)*['\"]?\s*)"
+)
 # Only the flags that make an rm destructive, any order, and at least one of them.
 # The `+` is on a flag+separator pair rather than zero-or-more flags: a flagless
 # `rm` cannot remove a directory, and matching zero flags made `rm *.tmp` and
