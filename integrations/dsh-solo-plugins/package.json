@@ -1,0 +1,11 @@
+{
+  "name": "dsh-solo-plugins",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "test": "node --test packages/solo-policy/test/*.test.mjs",
+    "check": "pnpm test"
+  },
+  "workspaces": ["packages/*"]
+}
