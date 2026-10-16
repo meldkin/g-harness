@@ -53,6 +53,8 @@ const ROOT_PATH = '[\'"]?(?:/(?:/|\\.+/?)*|[A-Za-z]:[/\\\\]+|/[A-Za-z]/+)';
 // ROOT_PATH plus the whole-system trees and tmp. A routine file under one of
 // those dirs (`rm /tmp/x.pid`) still fails the required `\s+<flags>`.
 const TARGET_PATH = '(?:' + ROOT_PATH + '(?:(?:etc|usr|var|bin|lib(?:64)?|boot|sbin|opt|root|sys|proc|dev|tmp)/?)?|~|\\*)';
+// Windows spellings of the same catastrophe; TARGET_PATH carries the Unix trees.
+const WIN_SYSTEM = '[\'"]?[A-Za-z]:[/\\\\]*(?:(?:Windows|WinNT|Users|ProgramData|System32|SysWOW64|Program Files(?: \\(x86\\))?)(?:[/\\\\]|\\s|$|"|\')|(?=\\s|$|\\*|"|\'))';
 const BLOCK_PATTERNS = [
   { name: 'rm_root', pattern: new RegExp(RM_CMD + RM_FLAGS + ROOT_PATH + '(?:\\s|$|\\*|"|\')') },
   // A root target that is not the first argument: `rm -rf build /`.
@@ -72,6 +74,11 @@ const BLOCK_PATTERNS = [
   { name: 'rm_temp_linux', pattern: new RegExp(RM_CMD + RM_FLAGS + '/tmp/') },
   { name: 'rm_temp_win', pattern: new RegExp(RM_CMD + RM_FLAGS + '\\$?(?:env:)?TEMP\\b', 'i') },
   { name: 'del_temp_win', pattern: /del\s+(?:\/f\s+)?\/[qs]\s+\$?(?:env:)?TEMP\b/i },
+  // Windows spellings of the Unix system trees TARGET_PATH carries. Measured open
+  // on 2026-10-16 in both engines: `rm -rf C:/Windows`, `Remove-Item -Recurse C:\`.
+  // A plain directory stays allowed; only a drive root or a system tree matches.
+  { name: 'rm_win_system', pattern: new RegExp(RM_CMD + RM_FLAGS + WIN_SYSTEM, 'i') },
+  { name: 'win_remove_recurse_root', pattern: new RegExp('(?:^|[;&|\\n]\\s*)Remove-Item\\b[^|;&\\n]*-Recurse\\b[^|;&\\n]*' + WIN_SYSTEM, 'i') },
   { name: 'force_push_main', pattern: /(?:^|[;&|]\s*)git\s+(?:-C\s+\S+\s+|-c\s+\S+\s+|--\S+\s+)*push\b[^&|;\n]*(?:--force|-f)\s+[^&|;\n]*(?:main|master)/ },
   // The segment stops at a shell separator, because
   // `git push origin main && npm install --force` was being read as a force-push.

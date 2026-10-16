@@ -62,6 +62,15 @@ _ROOT_PATH = r"(?:['\"])?(?:/(?:/|\.+/?)*|[A-Za-z]:[/\\]+|/[A-Za-z]/+)"
 # `rm /etc/ -rf` match; a routine file under one of these dirs (`rm /tmp/x.pid`)
 # still fails the required `\s+<flags>` and stays allowed.
 _TARGET_PATH = rf"(?:{_ROOT_PATH}(?:(?:etc|usr|var|bin|lib(?:64)?|boot|sbin|opt|root|sys|proc|dev|tmp)/?)?|~|\*)"
+# Windows spellings of the same catastrophe. _TARGET_PATH carries the Unix system
+# trees, and nothing carried these: measured 2026-10-16, `rm -rf C:/Windows` and
+# `Remove-Item -Recurse C:\` were both allowed by both engines. A plain directory
+# target (`Remove-Item -Recurse build`) deliberately still passes -- only a drive
+# root or a Windows system tree is matched here.
+_WIN_SYSTEM = (
+    r"(?:['\"])?[A-Za-z]:[/\\]*(?:(?:Windows|WinNT|Users|ProgramData|System32|"
+    r"SysWOW64|Program Files(?: \(x86\))?)(?:[/\\]|\s|$|\"|')|(?=\s|$|\*|\"|'))"
+)
 
 BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("rm_root", re.compile(rf"{_RM_CMD}{_RM_FLAGS}{_ROOT_PATH}(?:\s|$|\*|\"|')")),
@@ -226,6 +235,15 @@ BLOCK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("del_temp_win", re.compile(r"del\s+(?:/f\s+)?/[qs]\s+\$?(?:env:)?TEMP\b", re.I)),
     ("win_rd_recursive", re.compile(r"(?:rd|rmdir)\s+(?:.*\s)?/s\b", re.I)),
     ("win_del_any", re.compile(r"del\s+(?:.*\s)?/[qsf]\b", re.I)),
+    # The Windows-root pair measured open on 2026-10-16 (both engines allowed them).
+    ("rm_win_system", re.compile(rf"{_RM_CMD}{_RM_FLAGS}{_WIN_SYSTEM}", re.I)),
+    (
+        "win_remove_recurse_root",
+        re.compile(
+            rf"(?:^|[;&|\n]\s*)Remove-Item\b[^|;&\n]*-Recurse\b[^|;&\n]*{_WIN_SYSTEM}",
+            re.I,
+        ),
+    ),
     ("win_format_volume", re.compile(r"(?:^|[;&|]\s*)Format-Volume\b", re.I)),
     ("win_stop_computer", re.compile(r"(?:^|[;&|]\s*)Stop-Computer\b", re.I)),
     ("win_restart_computer", re.compile(r"(?:^|[;&|]\s*)Restart-Computer\b", re.I)),
