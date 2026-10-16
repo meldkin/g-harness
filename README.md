@@ -6,6 +6,10 @@ Engine support: **Kilo Code** (`.kilo/`, source of truth — all other engine ar
 
 > **v4.2.0:** OpenCode engine reintroduced as a first-class primary agent engine (removed in v4.0.0 as a 100%-parity mirror with no unique capability, then brought back once OpenCode v1.18+'s stable native format made near-identity regeneration from `.kilo/` cheap). Full history in `.kilo/memory/MEMORY.md` → "Decisions".
 
+> **Canonical repository:** <https://github.com/solo-code-com/Solo-Code-Harness> (MIT). The engine
+> version `4.3.1` is stamped in `.harness.lock`, `agent.yaml` and `pyproject.toml`; the
+> specification keeps its own document version (`SPEC.md`, currently `4.4.0`) — two axes, not drift.
+
 ## Quick Start
 
 ```bash
@@ -97,6 +101,43 @@ python tools/deploy.py
 | `.github/` | Shared scripts: `security_scan.py`, `checklist.py`, `check_skips.py`, `eval_harness.py`, `boundary_audit.py`, `security-allowlist.txt` + `copilot-instructions.md`, `prompts/` |
 | `tools/` | Generator (`generate_harness.py`, `claude_engine.py`), validator, drift detector (`garden.py`), integration tests, `shared_state.py` (runtime dep of Claude session hooks) |
 | `.vscode/` | VS Code settings + MCP config for Copilot |
+
+## Model Providers & the 4-Role Pipeline
+
+Four providers are generated into `.opencode/opencode.json` — `commandcode`, `freemodel`,
+`deepseek`, `openrouter` — with **92 model ids** declared in `tools/opencode_engine.py`. Their base
+URLs come from `.env`, and only `freemodel`'s template appends a path (`${OPENAI_BASE_URL}/v1`); the
+others are interpolated verbatim, so nothing may strip a trailing `/v1` from them.
+`tools/check_model_catalog.py` checks the ids against `GET /models` (plus `--probe`); ids are never
+taken from memory.
+
+Work is routed through four roles, declared in `.kilo/agents/jev.md`:
+
+| Role | Engine | Notes |
+|---|---|---|
+| **Jev** — routes only | agent on `openrouter/jev-router` | `edit: deny`; the wrapper launches it without `--auto` so the deny binds |
+| **Codex** — briefs and verification | `gpt-6.1-sol`, effort `medium` | `--model` / `--effort` override; launched by `codex-env.ps1` |
+| **DeepSeek V4.1 Flash** — implementation | OpenCode CLI (`tools/opencode_delegate.py`) or the direct API arm (`tools/model_api.py`) | one-shot: 2.3 s trivial, 22 s one file; 503 above ~38 K-token prompts |
+| **Gemini 3.8 Flash** — fast and broad work | Antigravity CLI, tiers `low`/`medium`/`high` (`tools/antigravity_delegate.py`) | independent review, repo-wide survey |
+
+Architecture, product and security judgment is not delegated: workers are context-blind.
+
+**A worker's output is a claim, not a result.** In controlled tests each worker produced at least
+one error invisible in its own summary — a wrong finding marked "Confident: Yes", two false
+positives reported as "unsure about: nothing". Their evidence is reliable; their self-assessment is
+not, so the orchestrator re-runs the commands and the real gates before trusting a change.
+
+## Confinement (WSL sandbox)
+
+Workers that need to run code in a loop can be fenced with `tools/wsl_sandbox.sh` (wired as
+`tools/model_api.py --sandbox wsl`): a private `/tmp` tmpfs, the workspace bound at `/tmp/work`,
+every Windows drive overlaid with its own tmpfs, and `/home` + `/root` read-only. `/mnt/wsl*` stays
+visible on purpose — hiding it kills DNS. The Windows ACL restricted-token path was measured and
+rejected: it breaks TLS (`SEC_E_NO_CREDENTIALS`), so no worker that calls an API can run inside it.
+
+Measured: two commands inside the fence in 10.9 s (pytest 9.1.1, ruff 0.17.1), writes outside the
+workspace refused, TLS 200. Agreed but not built: a docker fence (daemon not running) and dsh
+inside WSL to use its bwrap sandboxes, which are inert on Windows.
 
 ## DeepSeek Harness Port (Tier A)
 
@@ -408,6 +449,46 @@ python tools/deploy.py
 | `.github/` | Script dùng chung: `security_scan.py`, `checklist.py`, `check_skips.py`, `eval_harness.py`, `boundary_audit.py` + `copilot-instructions.md`, `prompts/` |
 | `tools/` | Generator (`generate_harness.py`, `claude_engine.py`), validator, drift detector (`garden.py`), integration tests, `shared_state.py` (runtime dep của Claude session hooks) |
 | `.vscode/` | VS Code settings + MCP config cho Copilot |
+
+> **Kho chính thức:** <https://github.com/solo-code-com/Solo-Code-Harness> (MIT). Version engine
+> `4.3.1` đóng dấu ở `.harness.lock`, `agent.yaml`, `pyproject.toml`; SPEC giữ version tài liệu
+> riêng (`SPEC.md`, hiện `4.4.0`) — hai trục, không phải drift.
+
+## Provider model & pipeline 4 vai trò
+
+Bốn provider được sinh vào `.opencode/opencode.json` — `commandcode`, `freemodel`, `deepseek`,
+`openrouter` — với **92 model id** khai trong `tools/opencode_engine.py`. Base URL lấy từ `.env`,
+và **chỉ** template của `freemodel` thêm đường dẫn (`${OPENAI_BASE_URL}/v1`); các cái còn lại dùng
+nguyên văn, nên không được cắt `/v1` của chúng. `tools/check_model_catalog.py` đối chiếu id với
+`GET /models` (kèm `--probe`); id không bao giờ lấy từ trí nhớ.
+
+Việc được định tuyến qua 4 vai trò, khai ở `.kilo/agents/jev.md`:
+
+| Vai trò | Engine | Ghi chú |
+|---|---|---|
+| **Jev** — chỉ định tuyến | agent trên `openrouter/jev-router` | `edit: deny`; wrapper chạy không `--auto` để deny có hiệu lực |
+| **Codex** — ra đề bài + thẩm định | `gpt-6.1-sol`, effort `medium` | đổi bằng `--model` / `--effort`; chạy qua `codex-env.ps1` |
+| **DeepSeek V4.1 Flash** — code | OpenCode CLI (`tools/opencode_delegate.py`) hoặc arm API trực tiếp (`tools/model_api.py`) | one-shot: 2,3 s việc nhỏ, 22 s một file; 503 khi prompt trên ~38K token |
+| **Gemini 3.8 Flash** — việc nhanh, rộng | Antigravity CLI, tier `low`/`medium`/`high` (`tools/antigravity_delegate.py`) | review độc lập, khảo sát toàn repo |
+
+Quyết định kiến trúc, sản phẩm, bảo mật không được giao: worker không có lịch sử hội thoại.
+
+**Kết quả worker là lời khai, không phải kết quả.** Trong các test có kiểm soát, mỗi worker đều
+tạo ra ít nhất một lỗi mà bản tự thuật của nó không thấy — một kết luận sai vẫn ghi "Confident:
+Yes", hai dương tính giả báo là "unsure about: nothing". Bằng chứng của họ đáng tin; tự đánh giá
+thì không — nên điều phối viên tự chạy lại lệnh và các gate thật trước khi tin.
+
+## Fence (sandbox WSL)
+
+Worker cần chạy vòng lặp có thể bị quây bằng `tools/wsl_sandbox.sh` (nối vào
+`tools/model_api.py --sandbox wsl`): `/tmp` riêng dạng tmpfs, workspace bind ở `/tmp/work`, mỗi ổ
+Windows phủ tmpfs riêng, `/home` + `/root` chỉ đọc. `/mnt/wsl*` cố ý để lộ — che nó là chết DNS.
+Đường restricted-token bằng ACL Windows đã đo và loại: nó phá TLS (`SEC_E_NO_CREDENTIALS`), nên
+worker gọi API không chạy trong đó được.
+
+Đã đo: hai lệnh trong fence hết 10,9 s (pytest 9.1.1, ruff 0.17.1), ghi ra ngoài workspace bị từ
+chối, TLS 200. Chưa làm: fence docker (daemon chưa chạy) và chạy dsh trong WSL để dùng sandbox
+bwrap (vô tác dụng trên Windows).
 
 ## DeepSeek Harness Port (Tầng A)
 
