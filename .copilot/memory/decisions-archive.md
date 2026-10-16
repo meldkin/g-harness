@@ -998,3 +998,26 @@ read-only tools, the allowlist parser rejected a comma list, and the first promp
 its step budget exploring instead of running the commands. Two of the worker's answers are worth
 keeping as the reference behaviour: "no execution tool available" and "VERDICT: FAIL - unverified,
 not demonstrated". It never claimed a verification it could not run.
+
+### 2026-10-16 - WSL is the viable confinement path; the Windows token is not
+
+G5 stopped on the Windows ACL restricted token because it breaks TLS (SEC_E_NO_CREDENTIALS) and
+every worker here calls an API. WSL2 on this machine does not have that defect: a plain `curl`
+inside it answers 200, unprivileged user namespaces are enabled (max_user_namespaces 63789), and
+`unshare` works. So the fence is built from namespaces and leaves networking alone on purpose.
+
+Shape, each part measured: `/tmp` is a private tmpfs and the workspace is bind-mounted there at
+`/tmp/work` (namespace root cannot create a directory at `/`); every Windows drive mount is
+overlaid with its own tmpfs, which denies writes to C: and F: - whereas `mount -o remount,ro /mnt`
+is not honoured for drvfs mounts and leaked a write into %TEMP%; `/home` and `/root` are self-bound
+read-only. Hiding all of `/mnt` was tried first and killed name resolution, because WSL keeps DNS
+and GUI plumbing under `/mnt/wsl` and `/mnt/wslg`, so the fence skips those.
+
+Wired as `model_api.py --sandbox wsl`: the argv still passes the program allowlist and the guard's
+veto, `python` maps to `python3`, and the timeout is longer for /mnt I/O. Verified end to end: a
+two-command tool loop inside the fence reported pytest 9.1.1 and ruff 0.17.1 in 10.9 seconds, with
+writes outside the workspace refused. WSL-side tooling was installed with `pip --user` (approved)
+and the fence adds `~/.local/bin` to PATH, which a non-interactive shell lacks.
+
+Open options, agreed but not started: docker (CLI present, daemon not running) and running dsh
+inside WSL to use its bwrap-based sandbox packages, which are inert on Windows.
