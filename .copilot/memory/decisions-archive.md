@@ -843,3 +843,53 @@ Still open, confirmed by re-running them (all predate the change; none is a regr
 - chained commands inside a wrapped payload slip, because a quoted span containing a
   separator is blanked wholesale before matching, and the unwrapping only happens for a
   leading wrapper.
+
+## 2026-10-16 - Guard round 3: conservative wrapper scanner (commit `c2e174f`)
+
+Round 2 closed four gaps but two of its bypasses were regressions (blocked at HEAD, allowed
+after). Round 3 closes both by making the scanner refuse to guess: the payload scan counts the
+contiguous backslash run before a candidate closing quote (odd = escaped), tracks an inner
+quote of the other kind, treats a doubled quote as the Windows escape, and leaves the text
+untouched on any ambiguity so the masking path that handled those shapes at HEAD still decides.
+The wrapper prefix list gained env, nohup, nice, command and time, closing a payload reached
+through env.
+
+Verification, all measured: a three-way probe (HEAD vs now) over 27 cases, all as required;
+five mutation runs, each reverting one half, each making tests fail, every file restored
+byte-identically; full checklist 7/7 run exclusively. **Zero regressions** from three
+independent sources: the orchestrator's probe, the verifier's attempt to construct one, and
+the reviewer's enumeration of 85 baseline blocked commands against four separators. **Zero
+over-blocks** measured across the 62 safe entries.
+
+**Both reviewers returned FAIL, and every finding was measured against HEAD before being
+accepted - all were pre-existing gaps, not regressions.** That is the rule that matters here:
+a FAIL describing a hole that already existed does not block a change that removes two real
+regressions; a FAIL describing a hole this change created does.
+
+Process notes worth keeping:
+- The orchestrator caught two errors in the round-3 brief before implementation: it had listed
+  five destructive commands (`eval`, pipe-into-shell, escaped spaces, a PowerShell doubled
+  quote, a nested escaped wrapper) as SAFE cases - pinning a gap as desired behaviour - and its
+  `env` helper assertion contradicted its own prefix extension.
+- The implementer made three deliberate deviations and each was right: keeping the standalone
+  sudo prefix, testing the doubled quote before the closing-quote test, and normalising a
+  backslash in an allow entry.
+
+### Open shell-quoting gaps (all pre-existing; allowed at HEAD too)
+
+1. the ambiguity bail-out is per command, not per wrapper, so a clean wrapper later in the
+   same line loses its unwrapping;
+2. a PowerShell payload using doubled quotes `""`;
+3. a nested wrapper whose inner quote is backslash-escaped;
+4. `cmd.exe` treats an apostrophe as a quote: a contraction in a cmd payload forces the bail;
+5. POSIX single quotes have no backslash escape, so the parity rule misfires on them;
+6. a trailing backslash before the closing quote in a `cmd` payload does the same;
+7. `eval 'rm -rf /'`;
+8. pipe-into-shell;
+9. escaped spaces (`sh -c rm\ -rf\ /`);
+10. secrets typed into a Kilo command are not scanned (secret-scan.js is matcher-scoped).
+
+**Round-4 design:** one scanner cannot serve POSIX, cmd and PowerShell - split the lexicon per
+shell family (POSIX: single quotes literal, double quotes backslash-escaped; cmd: `^` escapes,
+`""` for quotes, backslash is only a path separator; PowerShell: backtick escapes), and make
+the bail-out per wrapper instead of per command.
