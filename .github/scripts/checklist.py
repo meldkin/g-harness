@@ -160,7 +160,10 @@ def print_summary(results: list[dict]) -> bool:
     return True
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
+    """The CLI surface, separate from main() so it can be tested without running
+    the gate: checking that `--fast` exists and defaults correctly beats asserting
+    it by executing a five-minute checklist."""
     parser = argparse.ArgumentParser(description="Master validation checklist")
     parser.add_argument("project", help="Project path to validate")
     parser.add_argument("--url", help="URL for performance checks")
@@ -170,6 +173,11 @@ def main():
         help="Skip the coverage ratchet (it re-runs the whole suite, ~3 min). Use "
         "while iterating; run the full gate before a commit.",
     )
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
 
     project_path = Path(args.project).resolve()

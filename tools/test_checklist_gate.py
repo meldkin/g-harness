@@ -43,6 +43,16 @@ def _budget_project(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def test_build_parser_defaults_to_the_full_gate() -> None:
+    """`--fast` is opt-in: a forgotten flag still runs the ratchet, and asking for
+    the switch is what turns it off. Tested through the parser rather than by
+    running main(), which would execute a five-minute checklist."""
+    module = _load_checklist()
+    parser = module.build_parser()
+    assert parser.parse_args(["."]).fast is False
+    assert parser.parse_args([".", "--fast"]).fast is True
+
+
 def test_coverage_ratchet_skips_when_no_budget(tmp_path, capsys) -> None:
     """A project that never opted into a budget must not be failed by it."""
     module = _load_checklist()
