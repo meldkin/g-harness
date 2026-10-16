@@ -927,3 +927,19 @@ three new harness files (114 shared paths).
 arm because of the 503 ceiling, the Kilo arm because the orchestrator had left another Kilo
 session running against the same server. Two works in flight against one resource is an
 orchestration error, not worker flakiness, and the run was discarded rather than reported.
+
+### 2026-10-16 - The second A/B attempt was invalidated too, and again by the orchestrator
+
+The small-task head-to-head (one file, a ~10-line change to `tools/check_model_catalog.py`) had no
+clean result either: the direct arm's patch was applied and committed **before** the Kilo arm was
+launched, so Kilo found the change already present and correctly refused to invent a cosmetic
+diff. Its report is the model to copy - it backed the refusal with `git show HEAD:`,
+`git log -1 -- <file>`, `git show <commit> --` and `git status --porcelain`, and spotted that the
+brief's "measured defect" predated the commit.
+
+Both A/B attempts therefore failed for orchestration reasons, not worker reasons:
+1. two Kilo sessions against one server (the first attempt);
+2. applying one arm's artefact before running the other (the second).
+
+Rule for the next head-to-head: the arms must not share a mutable resource, and neither arm's
+output may enter the tree until both have run.
