@@ -22,8 +22,13 @@ ALIASES: dict[str, str] = {
     "FREEMODEL_API_KEY": "OPENAI_API_KEY",
 }
 
-#: Base URLs that must not carry a trailing `/v1` because the config appends it.
-NORMALIZE_BASE_URLS = ("OPENAI_BASE_URL", "COMMANDCODE_BASE_URL")
+#: Base URLs that must not carry a trailing `/v1`, because the generated provider config appends
+#: it (`"baseURL": "${OPENAI_BASE_URL}/v1"`). Only names whose template appends `/v1` belong here:
+#: COMMANDCODE_BASE_URL is used **verbatim** (`"baseURL": "${COMMANDCODE_BASE_URL}"`), so stripping
+#: its `/v1` broke every commandcode call through the OpenCode delegate (measured 2026-10-16:
+#: .env holds `.../provider/v1`, the export handed OpenCode `.../provider`). A test asserts this
+#: list against the templates actually present in the generated config.
+NORMALIZE_BASE_URLS = ("OPENAI_BASE_URL",)
 
 #: Default models per role, so a provider outage is a one-line `.env` change instead of a code
 #: edit. The delegate's own constant is the fallback when the variable is unset.

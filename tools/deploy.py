@@ -1577,6 +1577,28 @@ def deploy(
     print("=" * 60)
 
     if not dry_run:
+        # An upgrade from an earlier harness leaves its root documents behind, and this deploy must
+        # not touch them: a target's SPEC.md and docs/ are classified as project-owned (a project may
+        # keep its own spec there), so cleanup may never delete them. Say so instead of silently
+        # leaving a stale v4.1.0 SPEC in place.
+        legacy = []
+        if (target_path / "SPEC.md").is_file():
+            legacy.append("SPEC.md")
+        docs_dir = target_path / "docs"
+        if docs_dir.is_dir() and any(docs_dir.glob("deepseek-harness-upgrade-*.md")):
+            legacy.append("docs/ (harness dev docs from an earlier version)")
+        if legacy:
+            print()
+            print("  NOTE: this target looks like an earlier harness - it carries:")
+            for item in legacy:
+                print(f"        {item}")
+            print(
+                "        Those are treated as project-owned now, so this deploy never removes them."
+            )
+            print(
+                "        Delete them by hand if you want the target free of stale harness docs."
+            )
+
         print()
         print("  Next steps in target project:")
         print(f"    cd {target_path}")

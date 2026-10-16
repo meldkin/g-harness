@@ -599,3 +599,49 @@ def test_dry_run_is_never_blocked(tmp_path):
     rc = deploy.deploy(str(repo), dry_run=True, assume_yes=False)
     assert rc == 0, "dry-run was blocked by the live-deploy guard"
     assert not (repo / ".harness.lock").exists()
+
+
+# ??? upgrade note for a target that carries an earlier harness ???????????????
+
+
+def test_upgrade_note_names_legacy_docs_and_deletes_nothing(tmp_path: Path) -> None:
+    """Upgrading an old harness warns about its stale root docs and removes none of them.
+
+    A target's SPEC.md and docs/ are classified as project-owned - a project may keep its own spec
+    there - so cleanup may never delete them. An earlier harness that shipped them therefore leaves
+    them behind, and the deploy owes the operator a sentence about it.
+    """
+    proj = tmp_path / "old-harness"
+    (proj / "docs").mkdir(parents=True)
+    _write(proj / "SPEC.md", "# Specification v4.1.0\n")
+    _write(proj / "docs" / "deepseek-harness-upgrade-review-plan.md", "old doc\n")
+
+    result = subprocess.run(
+        [sys.executable, str(deploy.__file__), "deploy", str(proj), "--yes"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert "looks like an earlier harness" in result.stdout, result.stdout[-800:]
+    tail = result.stdout.split("looks like an earlier harness", 1)[1]
+    assert "SPEC.md" in tail, "the note must name the file the operator has to look at"
+    assert (proj / "SPEC.md").is_file(), (
+        "a project-owned root doc must survive an upgrade"
+    )
+    assert (proj / "docs" / "deepseek-harness-upgrade-review-plan.md").is_file()
+
+
+def test_upgrade_note_is_silent_for_a_fresh_target(tmp_path: Path) -> None:
+    proj = tmp_path / "fresh"
+    proj.mkdir()
+    _write(proj / "package.json", "{}\n")
+
+    result = subprocess.run(
+        [sys.executable, str(deploy.__file__), "deploy", str(proj), "--yes"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert "looks like an earlier harness" not in result.stdout
