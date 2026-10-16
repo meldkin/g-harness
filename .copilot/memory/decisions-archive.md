@@ -959,3 +959,24 @@ over-blocks** - an unanchored system-tree pattern that blocks a search merely na
 quote-parity leak after an unwrapped unclosed quote. Both are nuisances recorded earlier in this
 archive, not security holes; closing them means rewriting how masking pairs quotes, which is a
 round of its own.
+
+### 2026-10-16 - The two pre-existing over-blocks closed (commit `e0f10c4`)
+
+Both engines now anchor the Windows delete family at command position, so a search, an echo or a
+commit message that merely NAMES one is no longer blocked while a real invocation still is; and
+masking pairs quotes escape-aware, so an unwrapped unclosed quote no longer shifts the spans and
+turns a data span into a command. The escape-aware rule is deliberately limited to the adjacency
+case: a strictly escape-aware pairing would have turned a pinned wipe into a miss, which the
+implementer measured before choosing.
+
+Verification: RED twelve parity failures plus the in-process test, GREEN 476 passed, the
+orchestrator's 18-case probe through both engines, and three mutants held (one anchor fails six
+tests, the other four, the parity rule three).
+
+Two process notes worth keeping. First, the worker contradicted the orchestrator's brief: the brief
+claimed the Kilo engine already behaved, and the worker measured that both engines blocked the
+naming forms, then anchored both - the asymmetry in the brief came from reading a probe column
+whose meaning had been mis-stated. Second, one of the orchestrator's mutants was mis-targeted (it
+dropped the wrong pattern's anchor) and reported "not pinned"; only re-pointing the mutation at the
+named pattern showed the corpus does pin it. A mutation that cannot fail is evidence about the
+mutation before it is evidence about the tests.
