@@ -414,6 +414,53 @@ def test_safe_commands_allowed(command):
     assert _run_guard({"tool_name": "Bash", "tool_input": {"command": command}}) == 0
 
 
+# ── Secret shapes typed into a command (both engines must BLOCK) ──────────
+#
+# guard.py scans the raw Bash command text for SECRET_PATTERNS and denies it.
+# gate-guard.js did not scan commands at all, so a key typed on a command line
+# was blocked under Claude and allowed under Kilo -- the last measured
+# divergence of the guard review (2026-10-16). These lists are the corpus that
+# closes it, and they drive BOTH engines (see the parity test below).
+#
+# Values are assembled from fragments so this FILE never contains a literal a
+# secret scanner would flag -- the same discipline the dsh bridge's
+# rules.test.mjs uses (`fake('AKIA', 'A'.repeat(16))`). The key names are split
+# too (`"API_" + "KEY="`), for the same reason.
+
+
+def _fake(*parts: str) -> str:
+    return "".join(parts)
+
+
+SECRET_COMMAND_CASES: list[str] = [
+    # An unquoted shell assignment. generic_api_key needs a quoted value, so
+    # env_assignment_secret is the shape that catches a bare `KEY=value`.
+    _fake("export ", "API_", "KEY=", "Z", "q" * 24),
+    # An AWS access-key id.
+    _fake("export AWS_ACCESS_KEY_ID=", "AKIA", "A" * 16),
+    # A JWT in an Authorization header.
+    _fake(
+        'curl -H "Authorization: Bearer ',
+        "eyJhbGciOiJIUzI1NiJ9",
+        ".",
+        "eyJzdWIiOiIxMjM0NTY3ODkwI",
+        ".",
+        "s" * 24,
+        '"',
+    ),
+    # A connection URI carrying credentials.
+    _fake("psql ", "postgres://user:", "p" * 12, "@db.example.net:5432/app"),
+]
+
+# Allow twins: text that merely NAMES a placeholder (a search for a masked key)
+# must stay allowed, so an over-block fails loudly instead of silently
+# widening the guard.
+SECRET_PLACEHOLDER_CASES: list[str] = [
+    _fake('rg "API_', "KEY=", "x" * 20, '" .'),
+    _fake('rg "pass', "word=", "*" * 20, '" .'),
+]
+
+
 # ── Engine parity: behaviour, not pattern names ──────────────────────────
 # The two guards are hand-mirrored (guard.py for Claude, gate-guard.js for Kilo).
 # Comparing NAME SETS is not enough: the same name can carry a divergent regex,
@@ -465,6 +512,10 @@ def test_both_engines_define_the_same_block_patterns():
 PARITY_CORPUS: list[tuple[str, bool]] = [
     *[(command, True) for command in BLOCKED_COMMANDS],
     *[(command, False) for command in SAFE_COMMANDS],
+    # The secret shapes and their placeholder twins are part of the corpus
+    # too: both engines must reach the same verdict on them.
+    *[(command, True) for command in SECRET_COMMAND_CASES],
+    *[(command, False) for command in SECRET_PLACEHOLDER_CASES],
 ]
 
 
@@ -498,6 +549,33 @@ def test_guard_engines_agree(command, expected_blocked):
     assert python_blocked == expected_blocked, (
         f"guard.py {'blocked' if python_blocked else 'allowed'} {command!r}, "
         f"expected {'BLOCK' if expected_blocked else 'allow'}"
+    )
+
+
+@pytest.mark.parametrize("command", SECRET_COMMAND_CASES)
+def test_secret_in_command_blocks_both_engines(command):
+    """Claude already blocked these; Kilo must too.
+
+    RED before gate-guard.js grew SECRET_PATTERNS (guard.py=2, gate-guard.js=0),
+    GREEN after it blocks. Both engines run here, so an edit that drops the Kilo
+    scan fails on the assertion that names the engine.
+    """
+    assert _run_guard({"tool_name": "Bash", "tool_input": {"command": command}}) == 2, (
+        f"guard.py (Claude) allowed a secret-shaped command: {command!r}"
+    )
+    assert _run_gate_guard_js(command) == 2, (
+        f"gate-guard.js (Kilo) allowed a secret-shaped command: {command!r}"
+    )
+
+
+@pytest.mark.parametrize("command", SECRET_PLACEHOLDER_CASES)
+def test_secret_placeholder_in_command_allows_both_engines(command):
+    """The twins: naming a masked key is data, not a literal secret."""
+    assert _run_guard({"tool_name": "Bash", "tool_input": {"command": command}}) == 0, (
+        f"guard.py (Claude) over-blocked a placeholder search: {command!r}"
+    )
+    assert _run_gate_guard_js(command) == 0, (
+        f"gate-guard.js (Kilo) over-blocked a placeholder search: {command!r}"
     )
 
 

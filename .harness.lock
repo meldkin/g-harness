@@ -11,7 +11,7 @@
 [harness]
 version = "4.3.1"
 source = "solo-code-io/solo-code-cli"
-generated_at = "2026-10-16T01:33:44Z"
+generated_at = "2026-10-16T09:32:41Z"
 
 # --- ENGINE STATUS (v4.3.1) ---
 # .opencode/  -> first-class primary agent engine, now targeting OpenCode v2
@@ -93,6 +93,7 @@ paths = [
     "tools/approve_api_key.py",
     "tools/benchmark_executors.py",
     "tools/check_lint_budget.py",
+    "tools/check_model_catalog.py",
     "tools/claude_engine.py",
     "tools/claude_guard_compat.py",
     "tools/codex_delegate.py",
@@ -107,6 +108,7 @@ paths = [
     "tools/coverage_gate.py",
     "tools/deploy.py",
     "tools/dsh_delegate.py",
+    "tools/env_file.py",
     "tools/garden.py",
     "tools/generate_harness.py",
     "tools/gui/index.html",
@@ -115,6 +117,7 @@ paths = [
     "tools/kilo_cli_delegate.py",
     "tools/kilo_server_manager.py",
     "tools/kilo_usage_report.py",
+    "tools/model_api.py",
     "tools/opencode-skip-skills.txt",
     "tools/opencode_delegate.py",
     "tools/opencode_engine.py",

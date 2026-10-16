@@ -156,6 +156,45 @@ const BLOCK_PATTERNS = [
   { name: 'shutdown_system', pattern: /(?:^|[;&|]\s*)(?:shutdown|reboot|halt)\b/ },
 ];
 
+// ─── SECRET PATTERNS (exit 2) ─────────────────────────────────────────────
+// Shapes that mean a literal credential was typed into the command text. Kept
+// 1:1 with .claude/hooks/guard.py's SECRET_PATTERNS (ids and regexes), which is
+// the reference: it blocked these commands while Kilo allowed them -- the last
+// measured divergence of the guard review (2026-10-16). The JS form of each
+// regex mirrors the dsh bridge's SECRET_PATTERNS
+// (integrations/dsh-solo-plugins/.../solo-policy/src/rules.js) rather than
+// importing it, because a hook has to stand alone with no dependencies.
+//
+// This is a SEPARATE list from BLOCK_PATTERNS on purpose: BLOCK_PATTERNS keeps
+// its fixed 44-entry parity with guard.py's destructive set, and the secrets
+// are counted on their own so that parity does not move. The scan runs on the
+// raw command string; file contents stay secret-scan.js's territory (a warning).
+const SECRET_PATTERNS = [
+  { name: 'aws_access_key', pattern: /(?:AKIA|ASIA)[A-Z0-9]{16}/ },
+  { name: 'aws_secret_key', pattern: /(?:aws|amazon).{0,20}(?:secret|key|token).{0,10}[:=]\s*["'][A-Za-z0-9\/+=]{20,}/i },
+  { name: 'generic_api_key', pattern: /(?:api[_-]?key|apikey|secret|password)\s*[:=]\s*["'](?!\$)[^"']{8,}["']/i },
+  { name: 'env_assignment_secret', pattern: /(?:api[_-]?key|secret|token|password|passwd|credential)[a-z_-]*\s*[:=]\s*(?![^\s"']*(?:x{3}|\*{3}))[^\s"'$][^\s"']{15,}/i },
+  { name: 'private_key_pem', pattern: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/ },
+  { name: 'jwt_token', pattern: /eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/ },
+  { name: 'github_token', pattern: /(?:gh[pousr]_|github[_-]?pat[_-]?|github[_-]?token[_-]?)[A-Za-z0-9_]{20,}/i },
+  { name: 'google_api_key', pattern: /AIza[0-9A-Za-z_-]{35}/ },
+  { name: 'slack_token', pattern: /xox[baprs]-[0-9A-Za-z-]{10,}/ },
+  { name: 'stripe_key', pattern: /(?:sk|pk)_(?:test|live)_[0-9a-zA-Z]{24,}/ },
+  { name: 'mongodb_uri', pattern: /mongodb(?:\+srv)?:\/\/[^:]+:[^@]+@/ },
+  { name: 'postgres_uri', pattern: /postgres(?:ql)?:\/\/[^:]+:[^@]+@/ },
+  { name: 'redis_uri', pattern: /redis:\/\/[^:]+:[^@]+@/ },
+  { name: 'hardcoded_token', pattern: /(?:token|bearer)\s*[:=]\s*["'][A-Za-z0-9._\-+\/=]{20,}["']/i },
+  { name: 'discord_webhook', pattern: /https:\/\/discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-Za-z0-9_-]+/i },
+  { name: 'basic_auth', pattern: /https?:\/\/[^:]+:[^@]+@/ },
+  { name: 'anthropic_key', pattern: /sk-ant-[A-Za-z0-9\-_]{24,}/ },
+  { name: 'openai_project_key', pattern: /sk-proj-[A-Za-z0-9\-_]{20,}/ },
+  { name: 'npm_token', pattern: /npm_[A-Za-z0-9]{36}/ },
+  { name: 'gitlab_pat', pattern: /glpat-[A-Za-z0-9\-_]{20,}/ },
+  { name: 'digitalocean_token', pattern: /dop_v1_[A-Za-z0-9]{64}/ },
+  { name: 'bearer_header', pattern: /Bearer\s+[A-Za-z0-9._\-+\/=]{20,}/i },
+  { name: 'openai_legacy_key', pattern: /sk-[A-Za-z0-9]{20,}/ },
+];
+
 // ─── WARN PATTERNS ─────────────────────────────────────────────────────────
 const WARN_PATTERNS = [
   { name: 'npm_global', pattern: /npm\s+install\s+-g/,
@@ -689,6 +728,21 @@ process.stdin.on('end', () => {
         `\n[GateGuard] BLOCKED: ${blocked.message}\n` +
         `  Command: ${command.substring(0, 200)}\n` +
         (alts.length > 0 ? `  Safer alternatives:\n${alts.join('\n')}\n` : '') +
+        `  Bypass: GATE_GUARD_BYPASS=1\n\n`
+      );
+      process.exit(2);
+    }
+
+    // 1b. BLOCK a secret typed into the command text. Mirrors guard.py's
+    //     find_secret() on the raw command: a key pasted onto a command line is
+    //     the same leak as one written to a file, and Kilo used not to scan
+    //     commands at all. File contents stay secret-scan.js's job (a warning).
+    const secret = checkPatterns(SECRET_PATTERNS, command);
+    if (secret) {
+      process.stderr.write(
+        `\n[GateGuard] BLOCKED: possible secret '${secret.name}' in command. ` +
+        `Use environment variables instead.\n` +
+        `  Command: ${command.substring(0, 200)}\n` +
         `  Bypass: GATE_GUARD_BYPASS=1\n\n`
       );
       process.exit(2);

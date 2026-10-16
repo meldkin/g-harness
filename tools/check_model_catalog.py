@@ -163,6 +163,12 @@ def probe(model_ref: str, timeout: int) -> tuple[bool, str]:
         content = body["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError):
         return False, f"unexpected body: {json.dumps(body)[:100]}"
+    if not str(content or "").strip():
+        # The DeepSeek family answers with an empty `content`; the text lives in
+        # `reasoning_content`, so an empty cell would misreport a working model.
+        content = body["choices"][0]["message"].get("reasoning_content") or content
+    if not str(content or "").strip():
+        return True, "(empty reply)"
     return True, str(content).strip()[:40]
 
 

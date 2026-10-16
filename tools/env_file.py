@@ -80,3 +80,59 @@ def model_override(role: str) -> str | None:
     if not variable:
         return None
     return os.environ.get(variable) or None
+
+
+#: Where each provider's API lives: the single answer to "which service does this model's key
+#: come from". `base_env` is a literal URL or the name of a `.env` variable (read raw, so the
+#: paths below keep their `/v1`). Consumed by `tools/check_model_catalog.py` and
+#: `tools/model_api.py`.
+PROVIDERS: dict[str, dict[str, str]] = {
+    "commandcode": {
+        "base_env": "COMMANDCODE_BASE_URL",
+        "key_env": "COMMANDCODE_API_KEY",
+        "models_path": "/models",
+        "chat_path": "/chat/completions",
+    },
+    "freemodel": {
+        "base_env": "OPENAI_BASE_URL",
+        "key_env": "FREEMODEL_API_KEY",
+        "models_path": "/v1/models",
+        "chat_path": "/v1/chat/completions",
+    },
+    "deepseek": {
+        "base_env": "DEEPSEEK_BASE_URL",
+        "key_env": "DEEPSEEK_API_KEY",
+        "models_path": "/models",
+        "chat_path": "/chat/completions",
+    },
+    "openrouter": {
+        "base_env": "https://openrouter.ai/api/v1",
+        "key_env": "OPENROUTER_API_KEY",
+        "models_path": "/models",
+        "chat_path": "/chat/completions",
+    },
+}
+
+
+def provider_endpoint(provider: str, kind: str = "chat") -> tuple[str, str]:
+    """(url, api key) for a provider and an endpoint kind (`chat` or `models`).
+
+    The base url comes from the raw `.env` value (falling back to the process environment), and
+    the key honours the aliases above, so a `freemodel` call works without the launcher.
+    """
+    spec = PROVIDERS.get(provider)
+    if not spec:
+        raise KeyError(f"unknown provider {provider!r}; known: {', '.join(PROVIDERS)}")
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    base = spec["base_env"]
+    if not base.startswith("http"):
+        base = parse_env_file(env_path).get(base, "") or os.environ.get(base, "")
+    key = os.environ.get(spec["key_env"], "") or parse_env_file(env_path).get(
+        spec["key_env"], ""
+    )
+    if not key and spec["key_env"] == "FREEMODEL_API_KEY":
+        key = os.environ.get("OPENAI_API_KEY", "") or parse_env_file(env_path).get(
+            "OPENAI_API_KEY", ""
+        )
+    path = spec["chat_path"] if kind == "chat" else spec["models_path"]
+    return base.rstrip("/") + path, key
