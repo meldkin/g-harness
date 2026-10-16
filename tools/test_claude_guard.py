@@ -244,6 +244,13 @@ BLOCKED_COMMANDS = [
     # into a name no pattern matches and let the wipe through. Restricting the
     # decode to the quote character must put this back to BLOCKED.
     'powershell -Command "Remove-Item`t-Recurse`t-Force C:\\data"',
+    # Round-11: three misses where a shell runs text the guard never read. All
+    # three were measured ALLOWED at HEAD in both engines, and each really
+    # executes: `eval` concatenates its arguments, and a shell on the far side
+    # of a pipe reads stdin, so the unquoted spelling runs like the quoted one.
+    "eval rm -rf /",
+    "echo rm -rf / | bash",
+    "echo 'rm -rf /' | /bin/bash",
 ]
 
 
@@ -406,6 +413,13 @@ SAFE_COMMANDS = [
     # only prints it. The scanner kept the doubled quote, so the POSIX re-read
     # closed the span and put `rm` in command position.
     "powershell -Command 'Write-Host ''data; rm -rf /'''",
+    # Round-11 over-block guards, one twin per new block case: the same text
+    # merely NAMED inside a search is data. The quoted span carries a separator
+    # or sits behind a quote, so neither the `eval` rule nor the pipe rule reads
+    # it as an executable command.
+    'rg "eval rm -rf /" .',
+    'rg "echo rm -rf / | bash" .',
+    """rg "echo 'rm -rf /' | /bin/bash" .""",
 ]
 
 

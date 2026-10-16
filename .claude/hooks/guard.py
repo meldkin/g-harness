@@ -559,20 +559,25 @@ def find_closing_quote(
 
 
 # ─── Text a command runs without naming it ──────────────────────────────────
-# `eval` is not a wrapper, it runs its quoted argument. Read from the MASKED
-# text so an `eval` that is itself inside quoted search data is not at command
-# position and stays data (`rg "eval 'rm -rf /'" .` is a search).
-_EVAL_ARGUMENT = re.compile(r"(?:^|[;&|\n]\s*)eval\s+(?P<q>['\"])", re.I)
+# `eval` is not a wrapper, it runs its argument. The argument may be quoted
+# (`eval 'rm -rf /'`) or unquoted (`eval rm -rf /`), and `eval` concatenates
+# its arguments, so an unquoted run up to the next separator executes too. The
+# quote is therefore OPTIONAL and an empty group means "read the argument run".
+# Read from the MASKED text so an `eval` that is itself inside quoted search
+# data is not at command position and stays data (`rg "eval 'rm -rf /'" .` is a
+# search).
+_EVAL_ARGUMENT = re.compile(r"(?:^|[;&|\n]\s*)eval\s+(?P<q>['\"]?)", re.I)
 
 # A stage of a pipeline that IS a shell does not run the input command, it runs
 # the text that command PRINTS. The quoted spans on the input side are
 # therefore the script: `echo 'rm -rf /' | bash` executes `rm -rf /`. Masked
 # first for the same reason as `eval`: in `rg "echo 'rm -rf /' | bash" .` the
 # whole expression is one quoted span, the mask erases it, and the rule never
-# fires.
+# fires. The shell may be named by a path (`/bin/bash`, `/usr/bin/sh`) as well
+# as by a bare identifier.
 _PIPE_INTO_SHELL = re.compile(
     r"(?:^|[;&\n])(?P<input>[^;&\n]*?)\|\s*(?:(?:sudo|env)\s+(?:\w+=\S*\s+)*)?"
-    r"(?:bash|sh|zsh|ksh|pwsh|powershell)(?:\.exe)?(?![\w.-])",
+    r"(?:/?(?:[\w.-]+/)+)?(?:bash|sh|zsh|ksh|pwsh|powershell)(?:\.exe)?(?![\w.-])",
     re.I,
 )
 
@@ -601,23 +606,41 @@ def quoted_spans(text: str) -> list[str]:
 def executable_payloads(masked: str) -> list[str]:
     """Command text a masked command runs without naming it.
 
-    Two shapes: the argument of an executable `eval`, and the input side of a
-    pipeline that reaches a shell. Both are read from the MASKED command, so
-    the data-vs-command decision is made once, by the mask, and neither rule can
-    read quoted search data as a script.
+    Three shapes, all read from the MASKED command so the data-vs-command
+    decision is made once, by the mask, and no rule can read quoted search data
+    as a script: a quoted `eval` argument, an unquoted `eval` argument run, and
+    the input side of a pipeline that reaches a shell. The pipeline input
+    contributes its quoted spans AND its unquoted argument run, because the
+    shell runs whatever the input PRINTS, quoted or not.
     """
     payloads: list[str] = []
     for match in _EVAL_ARGUMENT.finditer(masked):
-        escape, doubled, escapable = dialect_of("bash", match.group("q"))
-        found = find_closing_quote(
-            masked, match.end(), match.group("q"), escape, doubled
-        )
-        if found:
-            payloads.append(
-                unescape_payload(masked[match.end() : found[0]], escape, escapable)
-            )
+        quote = match.group("q")
+        if quote:
+            escape, doubled, escapable = dialect_of("bash", quote)
+            found = find_closing_quote(masked, match.end(), quote, escape, doubled)
+            if found:
+                payloads.append(
+                    unescape_payload(masked[match.end() : found[0]], escape, escapable)
+                )
+        else:
+            # An unquoted argument run: `eval` concatenates its arguments, so
+            # the run up to the next separator is the text it executes. The
+            # shell strips a backslash before any character, so the unescape
+            # set is "any" (None), exactly as for an unquoted `-c` payload.
+            run_end = match.end()
+            while run_end < len(masked) and masked[run_end] not in ";&|\n":
+                run_end += 1
+            payloads.append(unescape_payload(masked[match.end() : run_end], "\\", None))
     for match in _PIPE_INTO_SHELL.finditer(masked):
-        payloads.extend(quoted_spans(match.group("input")))
+        input_side = match.group("input")
+        payloads.extend(quoted_spans(input_side))
+        # The shell runs whatever the piped text is, quoted or not: with no
+        # quotes anywhere (`echo rm -rf / | bash`) the argument run after the
+        # printing command is the script, so the words contribute a payload too.
+        words = input_side.split()
+        if len(words) > 1:
+            payloads.append(" ".join(words[1:]))
     return payloads
 
 

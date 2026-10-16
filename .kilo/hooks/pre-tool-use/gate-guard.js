@@ -580,13 +580,15 @@ function checkPatterns(patterns, command) {
 
 // ─── Text a command runs without naming it ──────────────────────────────────
 // Ports of guard.py's _EVAL_ARGUMENT / _PIPE_INTO_SHELL / quoted_spans() /
-// executable_payloads(): `eval` runs its quoted argument, and a pipeline stage
-// that IS a shell runs the text the input side PRINTS, so the quoted spans
-// there are the script. Both read the MASKED text, so quoted search data stays
-// data (`rg "echo 'rm -rf /' | bash" .` never fires).
-const EVAL_ARGUMENT = /(?:^|[;&|\n]\s*)eval\s+(?<q>['"])/gi;
+// executable_payloads(): `eval` runs its argument -- quoted or not, since it
+// concatenates its arguments, so an unquoted run executes too -- and a pipeline
+// stage that IS a shell runs the text the input side PRINTS, quoted or not. The
+// shell may be named by a path (`/bin/bash`), not only a bare identifier. Both
+// read the MASKED text, so quoted search data stays data
+// (`rg "echo 'rm -rf /' | bash" .` never fires).
+const EVAL_ARGUMENT = /(?:^|[;&|\n]\s*)eval\s+(?<q>['"]?)/gi;
 const PIPE_INTO_SHELL =
-  /(?:^|[;&\n])(?<input>[^;&\n]*?)\|\s*(?:(?:sudo|env)\s+(?:\w+=\S*\s+)*)?(?:bash|sh|zsh|ksh|pwsh|powershell)(?:\.exe)?(?![\w.-])/gi;
+  /(?:^|[;&\n])(?<input>[^;&\n]*?)\|\s*(?:(?:sudo|env)\s+(?:\w+=\S*\s+)*)?(?:\/?(?:[\w.-]+\/)+)?(?:bash|sh|zsh|ksh|pwsh|powershell)(?:\.exe)?(?![\w.-])/gi;
 
 // Bound on the recursion into embedded payloads, so a pathological nesting
 // cannot walk forever.
@@ -616,27 +618,43 @@ function executablePayloads(masked) {
   const payloads = [];
   for (const match of masked.matchAll(EVAL_ARGUMENT)) {
     const quote = match.groups.q;
-    const dialect = dialectOf('bash', quote);
     const start = match.index + match[0].length;
-    const found = findClosingQuote(
-      masked,
-      start,
-      quote,
-      dialect.escape,
-      dialect.doubled
-    );
-    if (found) {
-      payloads.push(
-        unescapePayload(
-          masked.slice(start, found[0]),
-          dialect.escape,
-          dialect.escapable
-        )
+    if (quote) {
+      const dialect = dialectOf('bash', quote);
+      const found = findClosingQuote(
+        masked,
+        start,
+        quote,
+        dialect.escape,
+        dialect.doubled
       );
+      if (found) {
+        payloads.push(
+          unescapePayload(
+            masked.slice(start, found[0]),
+            dialect.escape,
+            dialect.escapable
+          )
+        );
+      }
+    } else {
+      // An unquoted argument run: `eval` concatenates its arguments, so the run
+      // up to the next separator is the text it executes. The shell strips a
+      // backslash before any character, so the unescape set is null ("any"),
+      // exactly as for an unquoted `-c` payload.
+      let runEnd = start;
+      while (runEnd < masked.length && !';|&\n'.includes(masked[runEnd])) runEnd += 1;
+      payloads.push(unescapePayload(masked.slice(start, runEnd), '\\', null));
     }
   }
   for (const match of masked.matchAll(PIPE_INTO_SHELL)) {
-    payloads.push(...quotedSpans(match.groups.input));
+    const inputSide = match.groups.input;
+    payloads.push(...quotedSpans(inputSide));
+    // The shell runs whatever the piped text is, quoted or not: with no quotes
+    // anywhere (`echo rm -rf / | bash`) the argument run after the printing
+    // command is the script, so the words contribute a payload too.
+    const words = inputSide.split(/\s+/).filter(Boolean);
+    if (words.length > 1) payloads.push(words.slice(1).join(' '));
   }
   return payloads;
 }

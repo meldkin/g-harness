@@ -323,6 +323,24 @@ def test_payload_unescaping_stays_scoped_to_the_quote():
     )
 
 
+def test_unquoted_eval_and_pipelined_shells():
+    """Round-11: a shell runs text the guard never read, quoted or not.
+
+    `eval` concatenates its arguments, so an unquoted argument executes exactly
+    like the quoted form; a shell on the far side of a pipe reads stdin, so the
+    unquoted words on the input side are the script too; and that shell may be
+    named by a path (`/bin/bash`), not only by a bare identifier. Each case has
+    its twin: the same text merely NAMED inside a search stays data.
+    """
+    assert guard.find_destructive("eval rm -rf /") is not None
+    assert guard.find_destructive("echo rm -rf / | bash") is not None
+    assert guard.find_destructive("echo 'rm -rf /' | /bin/bash") is not None
+    # The twins: the same text, named inside a search, is data.
+    assert guard.find_destructive('rg "eval rm -rf /" .') is None
+    assert guard.find_destructive('rg "echo rm -rf / | bash" .') is None
+    assert guard.find_destructive("""rg "echo 'rm -rf /' | /bin/bash" .""") is None
+
+
 def run_self_test():
     """Run basic validation tests."""
     print("Guard hook self-test...")
@@ -339,6 +357,10 @@ def run_self_test():
         (
             "Quote-only payload unescaping",
             test_payload_unescaping_stays_scoped_to_the_quote,
+        ),
+        (
+            "Unquoted eval and piped shells",
+            test_unquoted_eval_and_pipelined_shells,
         ),
     ]
 
