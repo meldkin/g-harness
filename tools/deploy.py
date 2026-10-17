@@ -985,7 +985,14 @@ def _merge_list_file(src: Path, dst: Path, dry_run: bool, base: Path) -> str:
     text = dst.read_text(encoding="utf-8", errors="replace", newline="")
     existing = {ln.strip() for ln in text.splitlines()}
     wanted = src.read_text(encoding="utf-8", errors="replace", newline="").splitlines()
-    missing = [ln for ln in wanted if ln.strip() and ln.strip() not in existing]
+    # Comment-only lines are documentation, not rules. Targets often carry the same comment with a
+    # different dash character, and appending those would duplicate the file for no behavioural
+    # gain - the marker line already explains why rules were added.
+    missing = [
+        ln
+        for ln in wanted
+        if ln.strip() and not ln.strip().startswith("#") and ln.strip() not in existing
+    ]
     if not missing:
         return f"  [SKIP] {rel} - already has every harness rule"
 

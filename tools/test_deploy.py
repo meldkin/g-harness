@@ -746,3 +746,56 @@ def test_gitignore_merge_matches_the_files_line_endings(tmp_path: Path) -> None:
     appended = data[len(b"project-rule/\r\n") :]
     assert b"\r\n" in appended, "appended lines did not use the file's CRLF ending"
     assert b"\n" in appended
+
+
+def test_gitignore_merge_ignores_comment_only_differences(tmp_path: Path) -> None:
+    """Comments are documentation, not rules: a differently-dashed comment must not be re-appended.
+
+    The project's copy of a harness comment used an em dash where the harness file uses a plain
+    hyphen. Treating that as a missing rule made the merge append two comment lines - visible in a
+    dry-run against a real target as "would append 2 missing harness rule(s)" - for no behavioural
+    change at all.
+    """
+    proj = tmp_path / "comments"
+    proj.mkdir()
+    source = ROOT / ".gitignore"
+    rules = [
+        ln
+        for ln in source.read_text(encoding="utf-8").splitlines()
+        if ln.strip() and not ln.strip().startswith("#")
+    ]
+    # every real rule is present, but the comments are the project's own wording
+    _write(
+        proj / ".gitignore",
+        "# Reference repos — upstream projects, my own dash\n"
+        + "\n".join(rules)
+        + "\n",
+    )
+
+    status = deploy._merge_list_file(
+        source, proj / ".gitignore", dry_run=False, base=proj
+    )
+
+    assert "[SKIP]" in status, status
+    assert "added by the Solo-Code Harness deploy" not in (
+        proj / ".gitignore"
+    ).read_text(encoding="utf-8")
+
+
+def test_gitignore_merge_still_appends_missing_rules(tmp_path: Path) -> None:
+    """The comment rule must not swallow real rules: a missing rule is still appended."""
+    proj = tmp_path / "missing-rule"
+    proj.mkdir()
+    _write(proj / ".gitignore", "only-this-rule/\n")
+
+    status = deploy._merge_list_file(
+        ROOT / ".gitignore", proj / ".gitignore", dry_run=False, base=proj
+    )
+
+    assert "[MRG]" in status
+    merged = (proj / ".gitignore").read_text(encoding="utf-8")
+    assert ".env" in merged
+    assert "only-this-rule/" in merged
+    # no comment lines were appended, only the marker plus rules
+    added = merged.split("added by the Solo-Code Harness deploy", 1)[1]
+    assert not [ln for ln in added.splitlines() if ln.strip().startswith("#")], added

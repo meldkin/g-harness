@@ -1094,9 +1094,13 @@ kept as it is and only the harness rules it lacks are appended, under a marker l
 keeps every rule it wrote while `.env`, `.solocode/` and the cache directories are guaranteed to be
 ignored. A target with no `.gitignore` still receives the harness file verbatim, a second deploy
 finds nothing missing and writes nothing, and the appended block matches the file's own line endings
-(CRLF stays CRLF). Four tests pin the behaviour, and one of them caught a real bug in the first
-implementation: `Path.read_text()` normalises newlines, so the CRLF detection always chose LF and the
-append would have rewritten the ending of every line in the file. The remaining gap is the other
+(CRLF stays CRLF). Six tests pin the behaviour. One caught a real bug in the first implementation:
+`Path.read_text()` normalises newlines, so the CRLF detection always chose LF and the append would
+have rewritten the ending of every line in the file. Two more closed a gap that only a dry-run
+against the real target revealed: comments are documentation rather than rules, and a project copy of
+a harness comment differing only by dash character was being re-appended as a "missing rule", which
+is what a dry-run showed as *would append 2 missing harness rule(s)* on a file that was already
+correct. The remaining gap is the other
 structured root files a project may also own - `pyproject.toml`, `.ruff.toml`, `eslint.config.js`,
 `.pre-commit-config.yaml`, `Makefile` - which are still replaced wholesale, because a TOML file or a
 set of Make targets is not a line set; they are named in `MERGE_ROOT_FILES`' comment for whoever
