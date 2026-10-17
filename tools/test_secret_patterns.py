@@ -305,6 +305,14 @@ def test_strict_mode_skips_vendored_code_and_data_files(tmp_path):
     assert ci_scan_file(jquery, strict=True) == [], "vendored library code was scanned"
     assert ci_scan_file(snapshot, strict=True) == [], "a JSON data file was scanned"
 
+    # Django's collectstatic output holds bundled CKEditor/YUI/admin JS: generated, not authored.
+    collected = tmp_path / "staticfiles" / "ckeditor" / "plugin.js"
+    collected.parent.mkdir(parents=True)
+    collected.write_text("window.exec(payload);\n", encoding="utf-8")
+    assert ci_scan_file(collected, strict=True) == [], (
+        "collected static output was scanned"
+    )
+
 
 def test_secrets_are_still_scanned_in_json_and_vendored_code(tmp_path):
     """Narrowing the code-pattern pass must not narrow the secret pass."""

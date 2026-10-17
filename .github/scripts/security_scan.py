@@ -140,10 +140,12 @@ UNSAFE_SUFFIXES = {
     ".ps1",
 }
 
-# Third-party code a project vendors in place. Secrets are still scanned there - a leaked key is a
-# leaked key wherever it sits - but `UNSAFE_PATTERNS` are not: an eval() inside jQuery is the
-# library's business, not the project's. Every one of the remaining false positives came from these
-# directories (jquery, select2, xregexp).
+# Third-party and generated code a project vendors in place. Secrets are still scanned there - a
+# leaked key is a leaked key wherever it sits - but `UNSAFE_PATTERNS` are not: an eval() inside
+# jQuery, CKEditor or YUI is the library's business, not the project's. Measured on a real project:
+# the first pass raised 150 false positives (jquery/select2/xregexp under vendor/, JSON snapshots
+# quoting HTML), and once those were excluded another 97 appeared from bundled CKEditor and Django
+# admin files under `staticfiles/` - Django's collectstatic output, the same class as dist/build.
 VENDOR_DIRS = {
     "vendor",
     "vendors",
@@ -151,6 +153,7 @@ VENDOR_DIRS = {
     "thirdparty",
     "bower_components",
     "external",
+    "staticfiles",
 }
 
 
