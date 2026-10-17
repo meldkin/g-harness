@@ -85,11 +85,6 @@ High-signal context loaded at session start. Detailed history belongs in
   registry (seam `Popen`→`record_start(pid)`→`kill_tree` khi timeout). **Race thật**:
   interrupt bị ghi đè thành `exited` → claim `interrupting` trước khi giết.
   `send_message` chỉ cho phiên khai báo kênh (hiện chưa có).
-- [decision] Docs gộp (2026-10-16): 8 báo cáo lịch sử (upgrade-summary, audit-08-15,
-  audit-09-04, 5 file cross-review) vào
-  `docs/archive-harness-upgrade-review-and-audit-reports-2026.md` verbatim; 8 file gốc
-  thành con trỏ. Giữ standalone `deepseek-harness-upgrade-acceptance.md` +
-  `audit-2026-09-11.md`. garden.py bỏ qua docs trong `docs/` mà tên chứa review/report.
 - [decision] Parity launcher ↔ delegate về biến môi trường (2026-10-16): chỉ cắt `/v1` ở biến mà
   config sinh ra **thêm** `/v1` — hiện chỉ `OPENAI_BASE_URL`; `COMMANDCODE_BASE_URL` và
   `DEEPSEEK_BASE_URL` dùng **nguyên văn**. Cắt `/v1` của commandcode từng làm mọi call delegate
@@ -111,6 +106,7 @@ High-signal context loaded at session start. Detailed history belongs in
 - [decision] Hợp nhất một nguồn GitHub (2026-10-16, chủ dự án quyết): repo chính là
   `solo-code-com/Solo-Code-Harness` — giữ 3 sao + 1 fork, vì sao/rating gắn với **repo** chứ không
   gắn branch nên ghi đè `main` không làm mất. Mốc cũ `6f261bd` (208 commit) đã đẩy lên đó dưới nhánh
-  `archive/main-pre-g-harness`; tag `v4.1.0`/`v4.2.0` giữ nguyên. Lệnh ghi đè do chủ dự án tự chạy
-  (guard chặn agent force-push). Bản `reference\Solo-Code-Harness-main` đã xoá — không file nào
-  tham chiếu nó, object cũ vẫn ở `.git` local qua ref `oldharness/main`.
+  Do force-push bị guard chặn (agent không được lách), việc đồng bộ đã làm bằng **fast-forward**:
+  commit `ae754e7` có tree **y hệt** bộ mới (`b2aa4ae`) và parents = [mốc cũ, `main` của ta] ⇒ 208
+  commit cũ vào thẳng lịch sử chứ không bị mồ côi. Bản `reference\Solo-Code-Harness-main` đã xoá —
+  không file nào tham chiếu nó, object cũ vẫn ở `.git` local qua ref `oldharness/main`.

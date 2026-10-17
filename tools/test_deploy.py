@@ -671,3 +671,215 @@ def test_upgrade_note_is_silent_for_a_fresh_target(tmp_path: Path) -> None:
     )
 
     assert "from an earlier harness" not in result.stdout
+
+
+# --- the deploy must not replace a project's .gitignore (measured on a real upgrade) ------------
+
+
+def test_deploy_keeps_a_projects_own_gitignore_rules(tmp_path: Path) -> None:
+    """A target's own .gitignore rules survive, and the harness rules are guaranteed present.
+
+    The first live upgrade dropped five rules a project had written (*.log, logs/, one of its own
+    source paths, *.exe, .kilo/worktrees/) because .gitignore is in ROOT_FILES and was copied over.
+    A deploy cannot know which of a project's rules matter, so it now keeps the file and appends
+    only what is missing.
+    """
+    proj = tmp_path / "has-gitignore"
+    proj.mkdir()
+    _write(
+        proj / ".gitignore", "# project rules\nsource_code/only/here/\n*.log\n.venv/\n"
+    )
+
+    rc = deploy.deploy(str(proj), dry_run=False, assume_yes=True)
+    assert rc == 0
+
+    merged = (proj / ".gitignore").read_text(encoding="utf-8")
+    assert "source_code/only/here/" in merged, "the project's own rule was dropped"
+    assert "*.log" in merged
+    assert "*.venv" not in merged
+    # rules the harness depends on are now present even though the project never wrote them
+    assert ".env" in merged
+    assert ".solocode/" in merged
+    assert "__pycache__/" in merged
+    # and nothing was duplicated
+    lines = [ln for ln in merged.splitlines() if ln.strip()]
+    assert len(lines) == len(set(lines)), "the merge duplicated a rule"
+
+
+def test_gitignore_merge_is_idempotent(tmp_path: Path) -> None:
+    """A second deploy has nothing to add, so the file does not grow."""
+    proj = tmp_path / "idempotent"
+    proj.mkdir()
+    _write(proj / ".gitignore", "my-own-rule/\n")
+
+    assert deploy.deploy(str(proj), dry_run=False, assume_yes=True) == 0
+    first = (proj / ".gitignore").read_bytes()
+    assert deploy.deploy(str(proj), dry_run=False, assume_yes=True) == 0
+    second = (proj / ".gitignore").read_bytes()
+
+    assert first == second, "the second deploy changed .gitignore again"
+    assert first.decode("utf-8").count("added by the Solo-Code Harness deploy") == 1
+
+
+def test_fresh_target_gets_the_harness_gitignore_unchanged(tmp_path: Path) -> None:
+    """No existing file means the harness version is written verbatim."""
+    proj = tmp_path / "fresh"
+    proj.mkdir()
+
+    assert deploy.deploy(str(proj), dry_run=False, assume_yes=True) == 0
+
+    assert (proj / ".gitignore").read_bytes() == (ROOT / ".gitignore").read_bytes()
+
+
+def test_gitignore_merge_matches_the_files_line_endings(tmp_path: Path) -> None:
+    """A CRLF file keeps CRLF in the appended block, so git does not see the whole file change."""
+    proj = tmp_path / "crlf"
+    proj.mkdir()
+    (proj / ".gitignore").write_bytes(b"project-rule/\r\n")
+
+    status = deploy._merge_list_file(
+        ROOT / ".gitignore", proj / ".gitignore", dry_run=False, base=proj
+    )
+
+    assert "[MRG]" in status
+    data = (proj / ".gitignore").read_bytes()
+    appended = data[len(b"project-rule/\r\n") :]
+    assert b"\r\n" in appended, "appended lines did not use the file's CRLF ending"
+    assert b"\n" in appended
+
+
+def test_gitignore_merge_ignores_comment_only_differences(tmp_path: Path) -> None:
+    """Comments are documentation, not rules: a differently-dashed comment must not be re-appended.
+
+    The project's copy of a harness comment used an em dash where the harness file uses a plain
+    hyphen. Treating that as a missing rule made the merge append two comment lines - visible in a
+    dry-run against a real target as "would append 2 missing harness rule(s)" - for no behavioural
+    change at all.
+    """
+    proj = tmp_path / "comments"
+    proj.mkdir()
+    source = ROOT / ".gitignore"
+    rules = [
+        ln
+        for ln in source.read_text(encoding="utf-8").splitlines()
+        if ln.strip() and not ln.strip().startswith("#")
+    ]
+    # every real rule is present, but the comments are the project's own wording
+    _write(
+        proj / ".gitignore",
+        "# Reference repos — upstream projects, my own dash\n"
+        + "\n".join(rules)
+        + "\n",
+    )
+
+    status = deploy._merge_list_file(
+        source, proj / ".gitignore", dry_run=False, base=proj
+    )
+
+    assert "[SKIP]" in status, status
+    assert "added by the Solo-Code Harness deploy" not in (
+        proj / ".gitignore"
+    ).read_text(encoding="utf-8")
+
+
+def test_gitignore_merge_still_appends_missing_rules(tmp_path: Path) -> None:
+    """The comment rule must not swallow real rules: a missing rule is still appended."""
+    proj = tmp_path / "missing-rule"
+    proj.mkdir()
+    _write(proj / ".gitignore", "only-this-rule/\n")
+
+    status = deploy._merge_list_file(
+        ROOT / ".gitignore", proj / ".gitignore", dry_run=False, base=proj
+    )
+
+    assert "[MRG]" in status
+    merged = (proj / ".gitignore").read_text(encoding="utf-8")
+    assert ".env" in merged
+    assert "only-this-rule/" in merged
+    # no comment lines were appended, only the marker plus rules
+    added = merged.split("added by the Solo-Code Harness deploy", 1)[1]
+    assert not [ln for ln in added.splitlines() if ln.strip().startswith("#")], added
+
+
+# --- structured root files a project owns are never replaced ---------------------------------
+
+
+def test_project_owned_root_files_are_kept(tmp_path: Path) -> None:
+    """A target's own pyproject.toml, Makefile, .ruff.toml, pre-commit config and ESLint config stay.
+
+    Measured on a real upgrade: the deploy replaced them and the target lost its pytest testpaths and
+    pythonpath (its own tests stopped being collected), a ruff exclusion and a pre-commit exclude.
+    TOML, YAML, JS and Make cannot be merged line-wise the way .gitignore can, so they are kept and
+    reported instead of overwritten.
+    """
+    proj = tmp_path / "owns-config"
+    proj.mkdir()
+    own = {
+        "pyproject.toml": '[tool.pytest.ini_options]\ntestpaths = ["my_tests"]\n',
+        "Makefile": "mine:\n\techo mine\n",
+        ".ruff.toml": 'extend-exclude = ["my_dir"]\n',
+        ".pre-commit-config.yaml": "repos: []\n",
+        "eslint.config.js": "export default [];\n",
+    }
+    for name, body in own.items():
+        _write(proj / name, body)
+
+    rc = deploy.deploy(str(proj), dry_run=False, assume_yes=True)
+    assert rc == 0
+
+    for name, body in own.items():
+        assert (proj / name).read_text(encoding="utf-8") == body, f"{name} was replaced"
+
+
+def test_project_owned_root_files_are_written_when_absent(tmp_path: Path) -> None:
+    """A fresh target still receives them, so a new project is not left half-configured."""
+    proj = tmp_path / "fresh-config"
+    proj.mkdir()
+
+    assert deploy.deploy(str(proj), dry_run=False, assume_yes=True) == 0
+
+    for name in (
+        "pyproject.toml",
+        ".ruff.toml",
+        ".pre-commit-config.yaml",
+        "Makefile",
+        "eslint.config.js",
+    ):
+        assert (proj / name).is_file(), f"{name} missing on a fresh target"
+
+
+def test_write_if_absent_reports_new_skip_and_keep(tmp_path: Path) -> None:
+    src = ROOT / "Makefile"
+    target = tmp_path / "statuses"
+    target.mkdir()
+
+    assert "[NEW]" in deploy._write_if_absent(
+        src, target / "Makefile", dry_run=False, base=target
+    )
+    assert "[SKIP]" in deploy._write_if_absent(
+        src, target / "Makefile", dry_run=False, base=target
+    )
+
+    _write(target / "Makefile", "different:\n\ttrue\n")
+    status = deploy._write_if_absent(
+        src, target / "Makefile", dry_run=False, base=target
+    )
+    assert "[KEEP]" in status, status
+    assert (target / "Makefile").read_text(encoding="utf-8") == "different:\n\ttrue\n"
+
+
+def test_write_if_absent_does_nothing_on_dry_run(tmp_path: Path) -> None:
+    target = tmp_path / "dry"
+    target.mkdir()
+    status = deploy._write_if_absent(
+        ROOT / "Makefile", target / "Makefile", dry_run=True, base=target
+    )
+    assert "[DRY]" in status
+    assert not (target / "Makefile").exists()
+
+
+def test_root_file_sets_are_disjoint_and_inside_the_manifest() -> None:
+    """Guard the two policies: .gitignore is merged, structured files are kept, and both are shipped."""
+    assert not (deploy.MERGE_ROOT_FILES & deploy.PROJECT_OWNED_ROOT_FILES)
+    assert deploy.PROJECT_OWNED_ROOT_FILES.issubset(set(deploy.ROOT_FILES))
+    assert deploy.MERGE_ROOT_FILES.issubset(set(deploy.ROOT_FILES))
