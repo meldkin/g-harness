@@ -330,3 +330,36 @@ def test_secrets_are_still_scanned_in_json_and_vendored_code(tmp_path):
         assert any("SECRET" in finding[1] for finding in findings), (
             f"secret missed in {path.name}"
         )
+
+
+def test_inline_allow_marker_skips_unsafe_but_never_secrets(tmp_path):
+    """A line may opt out of the unsafe pass with a reason; the secret pass has no opt-out.
+
+    Seven of the eight findings in a real project were innerHTML assignments to literal markup (or
+    restoring the button's own saved markup), which are not injection sites. Suppressing them with a
+    separate allowlist file would put the justification far from the code; an inline marker keeps it
+    in place and shows up in the same diff.
+    """
+    allowed = tmp_path / "allowed.js"
+    allowed.write_text(
+        "el.innerHTML = '<b>static</b>'; // security-scan:allow static literal markup\n",
+        encoding="utf-8",
+    )
+    assert ci_scan_file(allowed, strict=True) == []
+
+    unaffected = tmp_path / "unaffected.js"
+    unaffected.write_text("el.innerHTML = userInput;\n", encoding="utf-8")
+    assert any(
+        "UNSAFE" in finding[1] for finding in ci_scan_file(unaffected, strict=True)
+    )
+
+    token = "sk-ant-api03-" + "b" * 40
+    secret = tmp_path / "secret.js"
+    secret.write_text(
+        f"const k = '{token}'; // security-scan:allow this must not hide a secret\n",
+        encoding="utf-8",
+    )
+    findings = ci_scan_file(secret, strict=True)
+    assert any("SECRET" in finding[1] for finding in findings), (
+        "the marker excused a secret"
+    )

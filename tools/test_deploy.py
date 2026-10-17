@@ -883,3 +883,42 @@ def test_root_file_sets_are_disjoint_and_inside_the_manifest() -> None:
     assert not (deploy.MERGE_ROOT_FILES & deploy.PROJECT_OWNED_ROOT_FILES)
     assert deploy.PROJECT_OWNED_ROOT_FILES.issubset(set(deploy.ROOT_FILES))
     assert deploy.MERGE_ROOT_FILES.issubset(set(deploy.ROOT_FILES))
+
+
+# --- root docs are replaced, but the operator is told ------------------------------------------
+
+
+def test_deploy_notices_root_docs_it_replaced(tmp_path: Path, capsys) -> None:
+    """A rulebook must stay current, so it is replaced - but a project's additions are reported.
+
+    AGENTS.md, CLAUDE.md and .env.template are not merged like .gitignore: a stale rulebook teaches
+    the wrong rules. Replacing them silently, though, is how a project's own section disappears
+    without anyone noticing until much later.
+    """
+    proj = tmp_path / "own-docs"
+    proj.mkdir()
+    _write(proj / "AGENTS.md", "# my rules\n\n## A section only this project has\n")
+    _write(proj / ".env.template", "MY_OWN_KEY=\n")
+
+    assert deploy.deploy(str(proj), dry_run=False, assume_yes=True) == 0
+
+    out = capsys.readouterr().out
+    assert "replaced root files" in out
+    assert "AGENTS.md" in out
+    assert ".env.template" in out
+    assert (proj / "AGENTS.md").read_text(encoding="utf-8") == (
+        ROOT / "AGENTS.md"
+    ).read_text(encoding="utf-8"), (
+        "the rulebook must be current, not the project's old copy"
+    )
+
+
+def test_deploy_stays_quiet_when_root_docs_were_absent(tmp_path: Path, capsys) -> None:
+    """A fresh target had nothing to lose, so no notice is printed."""
+    proj = tmp_path / "fresh-docs"
+    proj.mkdir()
+
+    assert deploy.deploy(str(proj), dry_run=False, assume_yes=True) == 0
+
+    out = capsys.readouterr().out
+    assert "replaced root files" not in out

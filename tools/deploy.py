@@ -1629,6 +1629,15 @@ def deploy(
         print("[ABORT] Deploy cancelled — nothing was written.")
         return 1
 
+    # Rulebooks and the env template must stay current (a stale rulebook silently teaches the wrong
+    # rules), so they are replaced - but a project may have added sections, and the operator deserves
+    # to see that in the output rather than discover it in a diff. Snapshotted before the copy.
+    watched_before = {
+        name: (target_path / name).read_bytes()
+        for name in ("AGENTS.md", "CLAUDE.md", ".env.template")
+        if (target_path / name).is_file()
+    }
+
     if engine == "kilo":
         dirs = DIRS_KILO
     elif engine == "copilot":
@@ -1769,6 +1778,24 @@ def deploy(
         print(f"    cd {target_path}")
         print("    python .github/scripts/security_scan.py .")
         print("    python .github/scripts/checklist.py .")
+
+        replaced = []
+        if not dry_run:
+            for name, before in watched_before.items():
+                now = target_path / name
+                if now.is_file() and now.read_bytes() != before:
+                    replaced.append(name)
+        if replaced:
+            print()
+            print("  NOTE: replaced root files that this target had its own copy of:")
+            for name in replaced:
+                print(f"        {name}")
+            print(
+                "        They are tracked in git, so `git diff <file>` shows what the project had."
+            )
+            print(
+                "        If the project had added its own sections there, merge them back by hand."
+            )
 
     return 0
 

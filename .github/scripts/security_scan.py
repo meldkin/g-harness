@@ -161,6 +161,13 @@ def _is_vendored(file_path: Path) -> bool:
     return any(part.lower() in VENDOR_DIRS for part in file_path.parts)
 
 
+# Inline opt-out for UNSAFE_PATTERNS: the reason lives next to the code it excuses, so a reviewer
+# sees it where it matters. Secrets are never allowlisted this way - a leaked key has no legitimate
+# exception - and a line that opts out without a reason still reads as one, because the marker text
+# itself is whatever the author wrote after `security-scan:allow`.
+ALLOW_MARKER = re.compile(r"security-scan\s*:\s*allow\b", re.IGNORECASE)
+
+
 def untracked_top_level_dirs(root: Path) -> set[str]:
     """Top-level directories inside `root` containing zero git-tracked files.
 
@@ -243,7 +250,10 @@ def scan_file(file_path: Path, strict: bool) -> list[tuple[str, str, int]]:
         for pattern, description in SECRET_PATTERNS:
             if re.search(pattern, line, re.IGNORECASE):
                 findings.append((str(file_path), f"SECRET: {description}", line_no))
-        if check_unsafe:
+        # A line may opt out of the unsafe-pattern pass with a reason, inline and next to the code
+        # that needs it, e.g. `el.innerHTML = '<b>static</b>'; // security-scan:allow static literal`.
+        # Secrets are never allowlisted this way: a leaked key has no legitimate exception.
+        if check_unsafe and not ALLOW_MARKER.search(line):
             for pattern, description in UNSAFE_PATTERNS:
                 if re.search(pattern, line, re.IGNORECASE):
                     findings.append((str(file_path), f"UNSAFE: {description}", line_no))
