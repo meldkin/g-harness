@@ -1188,3 +1188,39 @@ commits; the entry is historical and its reports already live in docs/.
   `docs/archive-harness-upgrade-review-and-audit-reports-2026.md` verbatim; 8 file gốc
   thành con trỏ. Giữ standalone `deepseek-harness-upgrade-acceptance.md` +
   `audit-2026-09-11.md`. garden.py bỏ qua docs trong `docs/` mà tên chứa review/report.
+
+### 2026-10-17 - Whole-project review: three High items closed, two gate bugs found by running the gate
+
+The review measured rather than assumed, and the most useful part was running the deployed
+`checklist.py` inside a real target project - it failed, and both failures were the harness's fault.
+Strict mode raised 150 findings and every one was false: jquery/select2/xregexp under `vendor/`,
+plus JSON snapshots quoting HTML. Narrowing `UNSAFE_PATTERNS` to code extensions and excluding
+vendored directories removed them; the next run produced 97 more from bundled CKEditor, YUI and
+Django admin files under `staticfiles/` (collectstatic output), which joined the same exclusion.
+What remains is eight findings in the project's own code - seven under `theme/`, one under
+`frontend/src/app/blog` - and that is the gate working, not a harness defect. Secrets are still
+scanned in every file, pinned by a test that plants a token in vendored JS and in JSON.
+
+The coverage ratchet failed with 40-odd files at 0% because `deploy.py` excludes `tools/test_*.py`
+by policy, so a runtime copy cannot reproduce the budget baselines. It now skips with a message
+when no harness tests are present, and a second test asserts it still enforces in this repo.
+
+The other High items: the two repositories were joined again with `e254c9a` (tree identical to
+main, parents the old main and this one), which pushed as a fast-forward to both and left all
+three refs equal; `v4.3.1` was tagged at that join and published to both repos, so the canonical
+repo now carries v4.1.0, v4.2.0 and v4.3.1. The target's `.env` gained `DEEPSEEK_BASE_URL` (the
+config interpolates it) with `DEEPSEEK_API_KEY` left as a commented placeholder for the owner to
+fill. MEMORY.md was pruned twice back under its 8000-character gate.
+
+Verified after the fixes: the redeploy onto the target left `.gitignore`, `pyproject.toml`,
+`.ruff.toml`, `.pre-commit-config.yaml`, `Makefile` and `eslint.config.js` byte-identical (the
+new keep/merge policies hold on a real project), the coverage ratchet passes there, and only the
+project's own eight findings still fail the secret scan.
+
+Moved out of MEMORY.md to make room for the review entry (its details are in the sections above):
+
+- [decision] G7 control plane (2026-10-15): `session_registry.py` +
+  `session_control.py` (`list`/`send`/`interrupt`/`prune`); cả 5 delegate đã ghi
+  registry (seam `Popen`→`record_start(pid)`→`kill_tree` khi timeout). **Race thật**:
+  interrupt bị ghi đè thành `exited` → claim `interrupting` trước khi giết.
+  `send_message` chỉ cho phiên khai báo kênh (hiện chưa có).

@@ -80,11 +80,6 @@ High-signal context loaded at session start. Detailed history belongs in
   wrapper chạy agent này **không `--auto`** để deny có hiệu lực. Gotcha: timeout mặc định
   của wrapper opencode/agy là **120s** → job dài bị giết oan (đã nâng 900/600); `.ps1` tải
   về bị mark-of-the-web → phải `Unblock-File`. Catalog **80 model / 4 provider**.
-- [decision] G7 control plane (2026-10-15): `session_registry.py` +
-  `session_control.py` (`list`/`send`/`interrupt`/`prune`); cả 5 delegate đã ghi
-  registry (seam `Popen`→`record_start(pid)`→`kill_tree` khi timeout). **Race thật**:
-  interrupt bị ghi đè thành `exited` → claim `interrupting` trước khi giết.
-  `send_message` chỉ cho phiên khai báo kênh (hiện chưa có).
 - [decision] Parity launcher ↔ delegate về biến môi trường (2026-10-16): chỉ cắt `/v1` ở biến mà
   config sinh ra **thêm** `/v1` — hiện chỉ `OPENAI_BASE_URL`; `COMMANDCODE_BASE_URL` và
   `DEEPSEEK_BASE_URL` dùng **nguyên văn**. Cắt `/v1` của commandcode từng làm mọi call delegate
@@ -110,3 +105,9 @@ High-signal context loaded at session start. Detailed history belongs in
   commit `ae754e7` có tree **y hệt** bộ mới (`b2aa4ae`) và parents = [mốc cũ, `main` của ta] ⇒ 208
   commit cũ vào thẳng lịch sử chứ không bị mồ côi. Bản `reference\Solo-Code-Harness-main` đã xoá —
   không file nào tham chiếu nó, object cũ vẫn ở `.git` local qua ref `oldharness/main`.
+- [decision] Review tổng thể 2026-10-17: hai repo đã hợp nhất bằng join `e254c9a` (local =
+  g-harness = Solo-Code-Harness ✓) và tag `v4.3.1` có trên cả hai ✓. Gate chạy trong dự án đích lộ 2
+  lỗi harness, đã vá: unsafe-pattern chỉ áp cho code + bỏ qua `vendor/`/`staticfiles/`/JSON
+  (`1c93b47`), và coverage ratchet skip khi bản runtime không có `test_*.py`. Còn mở: 8 finding XSS
+  thật trong code dự án đích (scanner chưa có cơ chế allowlist), 10 shell-quoting gaps của guard,
+  Docker/WSL chưa xong (5 volume chưa backup).
