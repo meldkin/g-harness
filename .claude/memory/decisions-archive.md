@@ -1177,3 +1177,14 @@ asking permission to rewrite.
 - [decision] G5 đóng ở nhánh restricted-token (2026-10-15): cơ chế chặn ghi đúng,
   nhưng TLS fail ⇒ không bọc được worker gọi API; chi tiết + việc kế ở
   `decisions-archive.md`.
+
+### 2026-10-17 - One more entry moved out of MEMORY.md (verbatim)
+
+Moved because MEMORY.md was within 111 characters of the 8000-character gate that blocks
+commits; the entry is historical and its reports already live in docs/.
+
+- [decision] Docs gộp (2026-10-16): 8 báo cáo lịch sử (upgrade-summary, audit-08-15,
+  audit-09-04, 5 file cross-review) vào
+  `docs/archive-harness-upgrade-review-and-audit-reports-2026.md` verbatim; 8 file gốc
+  thành con trỏ. Giữ standalone `deepseek-harness-upgrade-acceptance.md` +
+  `audit-2026-09-11.md`. garden.py bỏ qua docs trong `docs/` mà tên chứa review/report.
