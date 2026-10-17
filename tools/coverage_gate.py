@@ -181,6 +181,16 @@ def check_ratchet(
     return len(violations) == 0, violations
 
 
+def harness_tests_present(root: Path) -> bool:
+    """Does this checkout contain the harness's own tests?
+
+    A deployed target is a runtime copy: `deploy.py` excludes `tools/test_*.py` by policy, so the
+    budget's baselines cannot be reproduced there and every file reads 0%. That is a different kind
+    of checkout, not a regression.
+    """
+    return any((root / "tools").glob("test_*.py"))
+
+
 def main() -> int:
     if "--help" in sys.argv or "-h" in sys.argv:
         print(__doc__.strip())
@@ -234,6 +244,18 @@ def main() -> int:
         return 0
 
     # Default: enforce budget
+    # Measured on a real target: the gate failed with 40-odd files at 0% while the project was
+    # perfectly fine, because a deployed copy ships no harness tests and the budget keeps the full
+    # repo's baselines. Nothing to enforce is not the same as a regression.
+    if not harness_tests_present(ROOT):
+        print(
+            "[SKIP] No tools/test_*.py in this checkout: a deployed runtime copy has no harness"
+        )
+        print(
+            "       tests, so the coverage baselines do not apply here. Nothing to enforce."
+        )
+        return 0
+
     try:
         budget = load_budget()
     except (OSError, ValueError) as exc:

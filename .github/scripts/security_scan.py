@@ -66,7 +66,10 @@ UNSAFE_PATTERNS = [
     #   exec(cmd, args)              -- the thin spawnSync wrapper's own signature
     # Without both exclusions, enabling --strict flagged 17 benign hook sites and
     # was useless as a gate.
-    (r"exec\((?!\s*(?:['\"`][^'\"`]*['\"`]|\w+)\s*,)", "Use of exec() — code injection risk"),
+    (
+        r"exec\((?!\s*(?:['\"`][^'\"`]*['\"`]|\w+)\s*,)",
+        "Use of exec() — code injection risk",
+    ),
     (r"os\.system\(", "Use of os.system() — command injection risk"),
     (
         r"subprocess\.call\(.*shell\s*=\s*True",
@@ -119,6 +122,41 @@ SKIP_EXTENSIONS = {
 # not, because docs quote code constructs deliberately (see the module docstring).
 DOC_SUFFIXES = {".md", ".mdx", ".rst", ".txt", ".adoc"}
 
+# Only code can contain this class of construction. A JSON snapshot that happens to quote an HTML
+# snippet produced "React dangerouslySetInnerHTML" findings on three data files that never render
+# anything - part of the 150 false positives strict mode raised on a real project.
+UNSAFE_SUFFIXES = {
+    ".py",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".tsx",
+    ".html",
+    ".htm",
+    ".sh",
+    ".bash",
+    ".ps1",
+}
+
+# Third-party code a project vendors in place. Secrets are still scanned there - a leaked key is a
+# leaked key wherever it sits - but `UNSAFE_PATTERNS` are not: an eval() inside jQuery is the
+# library's business, not the project's. Every one of the remaining false positives came from these
+# directories (jquery, select2, xregexp).
+VENDOR_DIRS = {
+    "vendor",
+    "vendors",
+    "third_party",
+    "thirdparty",
+    "bower_components",
+    "external",
+}
+
+
+def _is_vendored(file_path: Path) -> bool:
+    return any(part.lower() in VENDOR_DIRS for part in file_path.parts)
+
 
 def untracked_top_level_dirs(root: Path) -> set[str]:
     """Top-level directories inside `root` containing zero git-tracked files.
@@ -142,7 +180,10 @@ def untracked_top_level_dirs(root: Path) -> set[str]:
     try:
         proc = subprocess.run(  # noqa: S603,S607 — fixed argv, no shell
             ["git", "-C", str(root), "ls-files"],  # noqa: S607 -- partial path, fixed argv
-            capture_output=True, text=True, timeout=60, check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return set()
@@ -190,7 +231,11 @@ def scan_file(file_path: Path, strict: bool) -> list[tuple[str, str, int]]:
     except Exception:
         return findings
 
-    check_unsafe = strict and file_path.suffix.lower() not in DOC_SUFFIXES
+    check_unsafe = (
+        strict
+        and file_path.suffix.lower() in UNSAFE_SUFFIXES
+        and not _is_vendored(file_path)
+    )
     for line_no, line in enumerate(content.splitlines(), 1):
         for pattern, description in SECRET_PATTERNS:
             if re.search(pattern, line, re.IGNORECASE):
@@ -217,7 +262,9 @@ def main():
 
     reference_dirs = frozenset(untracked_top_level_dirs(project_path))
     if reference_dirs:
-        print(f"Skipping untracked reference dirs: {', '.join(sorted(reference_dirs))}\n")
+        print(
+            f"Skipping untracked reference dirs: {', '.join(sorted(reference_dirs))}\n"
+        )
 
     all_findings = []
     file_count = 0

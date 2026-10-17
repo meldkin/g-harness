@@ -78,3 +78,28 @@ def test_check_ratchet_decreased():
     assert passed is False
     assert len(violations) == 1
     assert "a.py: 80.0% -> 75.0%" in violations[0]
+
+
+def test_runtime_copy_without_tests_is_skipped(tmp_path, monkeypatch, capsys):
+    """A deployed target has no harness tests, so the baselines cannot apply: skip, do not fail.
+
+    Measured on a real target: 40-odd files reported 0.0% because deploy.py excludes test_*.py by
+    policy, and the gate failed while the project was fine.
+    """
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "agent_scope.py").write_text("x = 1\n", encoding="utf-8")
+
+    monkeypatch.setattr(coverage_gate, "ROOT", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["coverage_gate.py"])
+
+    assert coverage_gate.main() == 0
+    out = capsys.readouterr().out
+    assert "[SKIP]" in out
+    assert "deployed runtime copy" in out
+
+
+def test_harness_tests_present_detects_both_checkouts(tmp_path):
+    """The guard itself must not fire in this repo, which does ship the tests."""
+    assert coverage_gate.harness_tests_present(ROOT) is True
+    (tmp_path / "tools").mkdir()
+    assert coverage_gate.harness_tests_present(tmp_path) is False

@@ -50,26 +50,38 @@ from security_scan import scan_file as ci_scan_file  # noqa: E402
 MUST_DETECT: list[tuple[str, str]] = [
     # The format this project itself uses -- missed by all 3 scanners because
     # `sk-[a-zA-Z0-9]{20,}` does not cross the "-" in "sk-ant-".
-    ("anthropic_sk_ant", 'ANTHROPIC_API_KEY=sk-ant-api03-AbCdEf1234567890AbCdEf1234567890AbCdEfGh'),
-    ("openai_sk_proj", 'OPENAI_API_KEY=sk-proj-AbCdEf1234567890AbCdEfGhIjKl'),
+    (
+        "anthropic_sk_ant",
+        "ANTHROPIC_API_KEY=sk-ant-api03-AbCdEf1234567890AbCdEf1234567890AbCdEfGh",
+    ),
+    ("openai_sk_proj", "OPENAI_API_KEY=sk-proj-AbCdEf1234567890AbCdEfGhIjKl"),
     # Bearer in an HTTP header has no quotes and no "=", so the quoted
     # `hardcoded_token` pattern never matched it.
-    ("bearer_header", 'curl -H "Authorization: Bearer AbCdEf1234567890AbCdEfGhIjKl" https://api.example.com'),
-    ("npm_token", 'NPM_TOKEN=npm_AbCdEf1234567890AbCdEf1234567890abcd'),
-    ("gitlab_pat", 'CI_TOKEN=glpat-AbCdEf1234567890AbCd'),
-    ("github_fine_grained", 'GITHUB_TOKEN=github_pat_11ABCDEFG0AbCdEf1234567890AbCdEf1234567890'),
-    ("digitalocean", 'DO_TOKEN=dop_v1_' + 'a' * 64),
+    (
+        "bearer_header",
+        'curl -H "Authorization: Bearer AbCdEf1234567890AbCdEfGhIjKl" https://api.example.com',
+    ),
+    ("npm_token", "NPM_TOKEN=npm_AbCdEf1234567890AbCdEf1234567890abcd"),
+    ("gitlab_pat", "CI_TOKEN=glpat-AbCdEf1234567890AbCd"),
+    (
+        "github_fine_grained",
+        "GITHUB_TOKEN=github_pat_11ABCDEFG0AbCdEf1234567890AbCdEf1234567890",
+    ),
+    ("digitalocean", "DO_TOKEN=dop_v1_" + "a" * 64),
     # Regression guards -- these already worked; they must keep working.
-    ("aws_access_key", 'AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE'),
-    ("google_api_key", 'GOOGLE_KEY=AIzaSyA1234567890abcdefghijklmnopqrstuv'),
-    ("slack_token", 'SLACK=xoxb-1234567890-AbCdEfGhIjKl'),
-    ("private_key_pem", '-----BEGIN RSA PRIVATE KEY-----'),
+    ("aws_access_key", "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"),
+    ("google_api_key", "GOOGLE_KEY=AIzaSyA1234567890abcdefghijklmnopqrstuv"),
+    ("slack_token", "SLACK=xoxb-1234567890-AbCdEfGhIjKl"),
+    ("private_key_pem", "-----BEGIN RSA PRIVATE KEY-----"),
 ]
 
 # Lines that must NOT trip any scanner. A detector that cries wolf gets
 # switched off, so false positives cost more than misses (SPEC 7.2.1).
 MUST_NOT_DETECT: list[tuple[str, str]] = [
-    ("prose_about_keys", "Store the API key in an environment variable, never in source."),
+    (
+        "prose_about_keys",
+        "Store the API key in an environment variable, never in source.",
+    ),
     ("short_placeholder", 'api_key = "TODO"'),
     ("env_var_reference", 'api_key = os.environ["ANTHROPIC_API_KEY"]'),
     ("sk_prefixed_word", "The sketch-utils module handles rendering."),
@@ -82,8 +94,7 @@ MUST_NOT_DETECT: list[tuple[str, str]] = [
 def _ci_scan(line: str) -> list[str]:
     """Run the CI scanner's patterns exactly as scan_file() does."""
     return [
-        desc for pattern, desc in CI_PATTERNS
-        if re.search(pattern, line, re.IGNORECASE)
+        desc for pattern, desc in CI_PATTERNS if re.search(pattern, line, re.IGNORECASE)
     ]
 
 
@@ -94,9 +105,7 @@ def _ci_scan(line: str) -> list[str]:
 # throwaway root with executor mode off so this file tests one thing only.
 _EXECUTOR_OFF_ROOT = Path(tempfile.mkdtemp(prefix="secretpat-exec-off-"))
 (_EXECUTOR_OFF_ROOT / ".solocode").mkdir(parents=True, exist_ok=True)
-(_EXECUTOR_OFF_ROOT / ".solocode" / "executor-mode").write_text(
-    "off", encoding="utf-8"
-)
+(_EXECUTOR_OFF_ROOT / ".solocode" / "executor-mode").write_text("off", encoding="utf-8")
 
 
 def _run_guard(payload: dict) -> int:
@@ -113,7 +122,10 @@ def _run_guard(payload: dict) -> int:
 def _run_secret_scan_js(content: str, file_path: str = "config.yml") -> int:
     """Invoke the Kilo secret-scan hook. Uses a secret-prone extension so a
     finding escalates to exit 2 (block) rather than a warning."""
-    payload = {"tool_name": "Write", "tool_input": {"file_path": file_path, "content": content}}
+    payload = {
+        "tool_name": "Write",
+        "tool_input": {"file_path": file_path, "content": content},
+    }
     proc = subprocess.run(
         ["node", str(SECRET_SCAN_JS)],
         input=json.dumps(payload),
@@ -131,7 +143,9 @@ def test_ci_scanner_detects(sample_id, line):
     assert _ci_scan(line), f"security_scan.py missed {sample_id}: {line[:60]}"
 
 
-@pytest.mark.parametrize("sample_id,line", MUST_NOT_DETECT, ids=[s[0] for s in MUST_NOT_DETECT])
+@pytest.mark.parametrize(
+    "sample_id,line", MUST_NOT_DETECT, ids=[s[0] for s in MUST_NOT_DETECT]
+)
 def test_ci_scanner_no_false_positive(sample_id, line):
     hits = _ci_scan(line)
     assert not hits, f"security_scan.py false-positive on {sample_id}: {hits}"
@@ -142,13 +156,21 @@ def test_ci_scanner_no_false_positive(sample_id, line):
 
 @pytest.mark.parametrize("sample_id,line", MUST_DETECT, ids=[s[0] for s in MUST_DETECT])
 def test_guard_blocks_secret_in_content(sample_id, line):
-    payload = {"tool_name": "Write", "tool_input": {"file_path": "config.py", "content": line}}
+    payload = {
+        "tool_name": "Write",
+        "tool_input": {"file_path": "config.py", "content": line},
+    }
     assert _run_guard(payload) == 2, f"guard.py allowed a write containing {sample_id}"
 
 
-@pytest.mark.parametrize("sample_id,line", MUST_NOT_DETECT, ids=[s[0] for s in MUST_NOT_DETECT])
+@pytest.mark.parametrize(
+    "sample_id,line", MUST_NOT_DETECT, ids=[s[0] for s in MUST_NOT_DETECT]
+)
 def test_guard_allows_non_secret(sample_id, line):
-    payload = {"tool_name": "Write", "tool_input": {"file_path": "notes.md", "content": line}}
+    payload = {
+        "tool_name": "Write",
+        "tool_input": {"file_path": "notes.md", "content": line},
+    }
     assert _run_guard(payload) == 0, f"guard.py false-blocked {sample_id}"
 
 
@@ -160,7 +182,9 @@ def test_kilo_secret_scan_blocks(sample_id, line):
     assert _run_secret_scan_js(line) == 2, f"secret-scan.js allowed {sample_id}"
 
 
-@pytest.mark.parametrize("sample_id,line", MUST_NOT_DETECT, ids=[s[0] for s in MUST_NOT_DETECT])
+@pytest.mark.parametrize(
+    "sample_id,line", MUST_NOT_DETECT, ids=[s[0] for s in MUST_NOT_DETECT]
+)
 def test_kilo_secret_scan_allows(sample_id, line):
     assert _run_secret_scan_js(line) == 0, f"secret-scan.js false-blocked {sample_id}"
 
@@ -175,8 +199,12 @@ def test_all_three_scanners_agree(sample_id, line):
     verdicts = {
         "security_scan.py": bool(_ci_scan(line)),
         "guard.py": _run_guard(
-            {"tool_name": "Write", "tool_input": {"file_path": "config.py", "content": line}}
-        ) == 2,
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": "config.py", "content": line},
+            }
+        )
+        == 2,
         "secret-scan.js": _run_secret_scan_js(line) == 2,
     }
     missed = [name for name, caught in verdicts.items() if not caught]
@@ -192,13 +220,17 @@ def test_all_three_scanners_agree(sample_id, line):
 
 def test_strict_does_not_scan_prose_for_injection_patterns(tmp_path):
     doc = tmp_path / "skill.md"
-    doc.write_text("Never call `eval(` or `os.system(` on user input.\n", encoding="utf-8")
+    doc.write_text(
+        "Never call `eval(` or `os.system(` on user input.\n", encoding="utf-8"
+    )
     assert ci_scan_file(doc, strict=True) == []
 
 
 def test_strict_still_scans_secrets_in_prose(tmp_path):
     doc = tmp_path / "skill.md"
-    doc.write_text('ANTHROPIC_API_KEY="sk-ant-AbCdEf1234567890AbCdEfGhIjKl"\n', encoding="utf-8")
+    doc.write_text(
+        'ANTHROPIC_API_KEY="sk-ant-AbCdEf1234567890AbCdEfGhIjKl"\n', encoding="utf-8"
+    )
     assert ci_scan_file(doc, strict=True), "a secret in a .md file must still be caught"
 
 
@@ -243,3 +275,50 @@ def test_exec_pattern_flags_injection_forms(line):
 def test_exec_pattern_allows_argv_forms(line):
     hits = [desc for pattern, desc in CI_UNSAFE_PATTERNS if re.search(pattern, line)]
     assert not any("exec(" in desc for desc in hits), f"false positive: {line}"
+
+
+def test_strict_mode_skips_vendored_code_and_data_files(tmp_path):
+    """UNSAFE_PATTERNS apply to first-party code only.
+
+    Measured on a real project: strict mode raised 150 findings and every one of them was inside
+    jquery/select2/xregexp under a vendor/ directory, or a JSON snapshot that quoted an HTML
+    snippet. Secrets are still scanned everywhere - this narrows the code-pattern pass, nothing else.
+    """
+    app = tmp_path / "app.js"
+    app.write_text("el.innerHTML = payload;\n", encoding="utf-8")
+
+    vendor = tmp_path / "lib" / "vendor"
+    vendor.mkdir(parents=True)
+    jquery = vendor / "jquery.js"
+    jquery.write_text("window.eval(payload);\n", encoding="utf-8")
+
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_text(
+        '{"html": "<b dangerouslySetInnerHTML=x></b>"}\n', encoding="utf-8"
+    )
+
+    app_findings = ci_scan_file(app, strict=True)
+    assert any("UNSAFE" in finding[1] for finding in app_findings), (
+        "a real finding was lost"
+    )
+
+    assert ci_scan_file(jquery, strict=True) == [], "vendored library code was scanned"
+    assert ci_scan_file(snapshot, strict=True) == [], "a JSON data file was scanned"
+
+
+def test_secrets_are_still_scanned_in_json_and_vendored_code(tmp_path):
+    """Narrowing the code-pattern pass must not narrow the secret pass."""
+    token = "sk-ant-api03-" + "a" * 40
+    vendor = tmp_path / "vendor"
+    vendor.mkdir()
+    secret_file = vendor / "bundle.js"
+    secret_file.write_text(f"const k = '{token}';\n", encoding="utf-8")
+
+    data_file = tmp_path / "config.json"
+    data_file.write_text('{"api_key": "' + token + '"}\n', encoding="utf-8")
+
+    for path in (secret_file, data_file):
+        findings = ci_scan_file(path, strict=True)
+        assert any("SECRET" in finding[1] for finding in findings), (
+            f"secret missed in {path.name}"
+        )
