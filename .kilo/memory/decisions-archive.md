@@ -1224,3 +1224,34 @@ Moved out of MEMORY.md to make room for the review entry (its details are in the
   registry (seam `Popen`→`record_start(pid)`→`kill_tree` khi timeout). **Race thật**:
   interrupt bị ghi đè thành `exited` → claim `interrupting` trước khi giết.
   `send_message` chỉ cho phiên khai báo kênh (hiện chưa có).
+
+### 2026-10-17 - Finishing the open list: five volumes recovered from an orphaned disk, and two small gates
+
+**The volumes were still there.** Docker Desktop had already been uninstalled before this work - both
+the app and its WSL distro were gone - but the uninstaller left the data disk behind at
+`D:\Docker\DockerDesktopWSL\disk\docker_data.vhdx` (97.49 GB). It was attached read-only with
+`wsl --mount --vhd <path> --bare` (no elevation needed, contrary to expectation) and mounted `-o ro`
+inside the Ubuntu distro as root. The layout is not the obvious one: the disk holds a `data/` root and
+the volumes sit at `data/docker/volumes/<name>/_data`, which took three attempts to find (`volumes`,
+then `data/volumes`, then the real path). All five volumes were tarred to
+`F:\docker-volume-backup`: dugout_dugout_dev_pgdata 12.08 MB, iepedu_postgres_data 7.15 MB,
+pal_mod_postgres_data 20.27 MB, and two Directus volumes that are genuinely empty (111 bytes each).
+Contents were verified, not just sizes: the postgres archives list `base/4/...` and `18/docker/base/...`.
+The disk was detached afterwards. The 97.5 GB vhdx can now be deleted, but that waits for the owner's
+word.
+
+**Two small gate improvements.** The scanner gained an inline `security-scan:allow <reason>` marker:
+a line opts out of the unsafe-pattern pass with the justification next to the code, and secrets have no
+opt-out (a test plants a token beside a marker to prove it). In the target that turned eight findings
+into one - seven `innerHTML` assignments to literal markup, or restorations of a button's own saved
+markup, now carry reasoned markers; the eighth, `dangerouslySetInnerHTML` of `post.content` in the blog
+page, is deliberately left visible because that content is rendered as HTML and needs sanitising or a
+decision, not a marker. Separately, `deploy.py` now snapshots `AGENTS.md`, `CLAUDE.md` and
+`.env.template` and prints a note when it replaced a copy the target had, because those must stay
+current but a project may have added its own sections.
+
+**A correction to the review report.** It listed ten shell-quoting gaps in the guard as open. They are
+not: the same archive records them closed at commit `29b94a8`, and the section the report read was the
+historical list from before that work. The honest summary of what remains is shorter than the report
+said: the real XSS finding in the target, the Docker Engine install (needs the owner's sudo), deleting
+the recovered disk (needs approval), and `DEEPSEEK_API_KEY` for the target's deepseek provider.
