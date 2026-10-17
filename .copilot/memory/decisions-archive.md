@@ -1100,11 +1100,17 @@ have rewritten the ending of every line in the file. Two more closed a gap that 
 against the real target revealed: comments are documentation rather than rules, and a project copy of
 a harness comment differing only by dash character was being re-appended as a "missing rule", which
 is what a dry-run showed as *would append 2 missing harness rule(s)* on a file that was already
-correct. The remaining gap is the other
-structured root files a project may also own - `pyproject.toml`, `.ruff.toml`, `eslint.config.js`,
-`.pre-commit-config.yaml`, `Makefile` - which are still replaced wholesale, because a TOML file or a
-set of Make targets is not a line set; they are named in `MERGE_ROOT_FILES`' comment for whoever
-takes that on.
+correct. Those structured root files were a gap as well, and closing it proved the damage was real:
+the same upgrade had replaced three of them in that target and taken project settings with it -
+`pyproject.toml` lost its pytest `testpaths` and `pythonpath`, so the project's own tests stopped
+being collected; `.ruff.toml` lost its `source_code/tuvi` exclusion; `.pre-commit-config.yaml` lost
+the `cocoindex-code-main` exclusion when the harness swapped one hardcoded name for five others. All
+three are restored alongside the harness improvements and committed in the target as `e125643`. The
+deploy now carries `PROJECT_OWNED_ROOT_FILES` - written only when a target has none, kept and
+reported as `[KEEP]` when it has its own, because TOML, YAML, JS and Make cannot be merged line-wise.
+Five tests pin it, including one that asserts the two policies stay disjoint and both remain subsets
+of `ROOT_FILES`. Verified on the real target: its dry-run now reports `[KEEP]` for exactly those
+three files and would touch none of them.
 
 ### 2026-10-16 - Consolidating on one GitHub repo, and what a force-push does and does not keep
 

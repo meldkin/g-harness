@@ -106,6 +106,19 @@ HARNESS_OWNED_ROOT_FILES = set(ROOT_FILES) | RETIRED_ROOT_FILES | {".harness.loc
 # replaced for now and are listed in the archive as the remaining gap.
 MERGE_ROOT_FILES = {".gitignore"}
 
+# Root files a project very likely owns and customises, and which are structured formats - TOML,
+# YAML, JS, Make - so the line-set merge used for .gitignore is not available. They are written only
+# when the target has none; an existing file is kept and reported. A measured upgrade replaced them
+# and silently removed a project's pytest testpaths, one of its ruff exclusions and a pre-commit
+# exclude, which is why this set exists.
+PROJECT_OWNED_ROOT_FILES = {
+    "pyproject.toml",
+    ".ruff.toml",
+    "eslint.config.js",
+    ".pre-commit-config.yaml",
+    "Makefile",
+}
+
 # Directories that belong to the harness ENTIRELY. Anything inside them that
 # the harness no longer ships is by definition a leftover from an older
 # deploy, so full stale-cleanup is safe here.
@@ -1015,6 +1028,29 @@ def _merge_list_file(src: Path, dst: Path, dry_run: bool, base: Path) -> str:
     return f"  [MRG] {rel} - appended {len(missing)} missing harness rule(s)"
 
 
+def _write_if_absent(src: Path, dst: Path, dry_run: bool, base: Path) -> str:
+    """Copy `src` only when `dst` does not exist; never replace a file the project owns.
+
+    For structured root files (see PROJECT_OWNED_ROOT_FILES) there is no line-set merge to apply,
+    so the honest move is to leave the project's copy alone and tell the operator it was kept.
+    """
+    rel = dst.relative_to(base)
+    if not dst.is_file():
+        if dry_run:
+            return f"  [DRY] {rel} (written: target has none)"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        return f"  [NEW] {rel}"
+
+    try:
+        same = dst.read_bytes() == src.read_bytes()
+    except OSError:
+        same = False
+    if same:
+        return f"  [SKIP] {rel} - identical to the harness copy"
+    return f"  [KEEP] {rel} - target's own file kept (it differs from the harness copy)"
+
+
 def copy_file(src: Path, dst: Path, dry_run: bool, base: Path | None = None) -> str:
     """Copy a single file. Returns status string.
 
@@ -1189,6 +1225,8 @@ def scaffold(
             continue
         if f in MERGE_ROOT_FILES:
             status = _merge_list_file(src, target_path / f, dry_run, base=target_path)
+        elif f in PROJECT_OWNED_ROOT_FILES:
+            status = _write_if_absent(src, target_path / f, dry_run, base=target_path)
         else:
             status = copy_file(src, target_path / f, dry_run, base=target_path)
         print(status)
@@ -1196,6 +1234,8 @@ def scaffold(
             total_new += 1
         elif "[UPD]" in status or "[MRG]" in status:
             total_upd += 1
+        elif "[KEEP]" in status:
+            total_skip += 1
 
     # Copy .gitignore last so it can't be overwritten by dir copies
     # Already handled in ROOT_FILES
@@ -1620,6 +1660,8 @@ def deploy(
             continue
         if f in MERGE_ROOT_FILES:
             status = _merge_list_file(src, target_path / f, dry_run, base=target_path)
+        elif f in PROJECT_OWNED_ROOT_FILES:
+            status = _write_if_absent(src, target_path / f, dry_run, base=target_path)
         else:
             status = copy_file(src, target_path / f, dry_run, base=target_path)
         print(status)
@@ -1627,6 +1669,8 @@ def deploy(
             total_new += 1
         elif "[UPD]" in status or "[MRG]" in status:
             total_upd += 1
+        elif "[KEEP]" in status:
+            total_skip += 1
 
     for d in dirs:
         src = ROOT / d

@@ -799,3 +799,87 @@ def test_gitignore_merge_still_appends_missing_rules(tmp_path: Path) -> None:
     # no comment lines were appended, only the marker plus rules
     added = merged.split("added by the Solo-Code Harness deploy", 1)[1]
     assert not [ln for ln in added.splitlines() if ln.strip().startswith("#")], added
+
+
+# --- structured root files a project owns are never replaced ---------------------------------
+
+
+def test_project_owned_root_files_are_kept(tmp_path: Path) -> None:
+    """A target's own pyproject.toml, Makefile, .ruff.toml, pre-commit config and ESLint config stay.
+
+    Measured on a real upgrade: the deploy replaced them and the target lost its pytest testpaths and
+    pythonpath (its own tests stopped being collected), a ruff exclusion and a pre-commit exclude.
+    TOML, YAML, JS and Make cannot be merged line-wise the way .gitignore can, so they are kept and
+    reported instead of overwritten.
+    """
+    proj = tmp_path / "owns-config"
+    proj.mkdir()
+    own = {
+        "pyproject.toml": '[tool.pytest.ini_options]\ntestpaths = ["my_tests"]\n',
+        "Makefile": "mine:\n\techo mine\n",
+        ".ruff.toml": 'extend-exclude = ["my_dir"]\n',
+        ".pre-commit-config.yaml": "repos: []\n",
+        "eslint.config.js": "export default [];\n",
+    }
+    for name, body in own.items():
+        _write(proj / name, body)
+
+    rc = deploy.deploy(str(proj), dry_run=False, assume_yes=True)
+    assert rc == 0
+
+    for name, body in own.items():
+        assert (proj / name).read_text(encoding="utf-8") == body, f"{name} was replaced"
+
+
+def test_project_owned_root_files_are_written_when_absent(tmp_path: Path) -> None:
+    """A fresh target still receives them, so a new project is not left half-configured."""
+    proj = tmp_path / "fresh-config"
+    proj.mkdir()
+
+    assert deploy.deploy(str(proj), dry_run=False, assume_yes=True) == 0
+
+    for name in (
+        "pyproject.toml",
+        ".ruff.toml",
+        ".pre-commit-config.yaml",
+        "Makefile",
+        "eslint.config.js",
+    ):
+        assert (proj / name).is_file(), f"{name} missing on a fresh target"
+
+
+def test_write_if_absent_reports_new_skip_and_keep(tmp_path: Path) -> None:
+    src = ROOT / "Makefile"
+    target = tmp_path / "statuses"
+    target.mkdir()
+
+    assert "[NEW]" in deploy._write_if_absent(
+        src, target / "Makefile", dry_run=False, base=target
+    )
+    assert "[SKIP]" in deploy._write_if_absent(
+        src, target / "Makefile", dry_run=False, base=target
+    )
+
+    _write(target / "Makefile", "different:\n\ttrue\n")
+    status = deploy._write_if_absent(
+        src, target / "Makefile", dry_run=False, base=target
+    )
+    assert "[KEEP]" in status, status
+    assert (target / "Makefile").read_text(encoding="utf-8") == "different:\n\ttrue\n"
+
+
+def test_write_if_absent_does_nothing_on_dry_run(tmp_path: Path) -> None:
+    target = tmp_path / "dry"
+    target.mkdir()
+    status = deploy._write_if_absent(
+        ROOT / "Makefile", target / "Makefile", dry_run=True, base=target
+    )
+    assert "[DRY]" in status
+    assert not (target / "Makefile").exists()
+
+
+def test_root_file_sets_are_disjoint_and_inside_the_manifest() -> None:
+    """Guard the two policies: .gitignore is merged, structured files are kept, and both are shipped."""
+    assert not (deploy.MERGE_ROOT_FILES & deploy.PROJECT_OWNED_ROOT_FILES)
+    assert deploy.PROJECT_OWNED_ROOT_FILES.issubset(set(deploy.ROOT_FILES))
+    assert deploy.MERGE_ROOT_FILES.issubset(set(deploy.ROOT_FILES))
