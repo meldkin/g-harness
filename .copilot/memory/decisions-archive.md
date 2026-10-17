@@ -1255,3 +1255,27 @@ not: the same archive records them closed at commit `29b94a8`, and the section t
 historical list from before that work. The honest summary of what remains is shorter than the report
 said: the real XSS finding in the target, the Docker Engine install (needs the owner's sudo), deleting
 the recovered disk (needs approval), and `DEEPSEEK_API_KEY` for the target's deepseek provider.
+
+### 2026-10-17 - Docker Desktop is gone; the engine now runs inside the Ubuntu distro, with its data on D:
+
+The owner had already uninstalled Docker Desktop, so no comparison benchmark was possible and none
+was run - the "before" numbers were never captured. What replaced it, measured after the fact:
+
+- Docker Engine **29.9.1** installed from Docker's own apt repository into the Ubuntu 24.04 distro,
+  started by systemd (`docker.service`, enabled), answer `client=29.9.1 server=29.9.1`,
+  `storage=overlayfs`, `root=/var/lib/docker`, `hello-world` pulled and ran.
+- That data root lives inside the distro's `ext4.vhdx`, which was moved to `D:\WSL\Ubuntu`
+  the day before, so images and volumes land on D: by construction: the disk grew 10.13 -> 10.60 GB
+  when the engine and one image were added.
+- `/usr/bin/docker` in the distro had been a symlink into Docker Desktop's tools; it was dangling
+  after the uninstall and was removed before the install, otherwise the shim would have shadowed the
+  new binary. The Windows-side `docker` command is gone with Desktop; containers are driven from
+  inside WSL now.
+- The orphaned Desktop data disk (97.49 GB) was deleted with explicit approval after its five volumes
+  were recovered, which returned D: from 3,360.9 to 3,458.1 GB free.
+
+Two things worth remembering. The `sudo` password the owner supplied was never needed - WSL's
+`-u root` runs as root without a prompt, which is how the mount and the install were done; a secret
+typed into a chat transcript should be rotated regardless. And the earlier "docker daemon not
+running" note in this archive was measured before all of this and is now simply obsolete: there is no
+daemon on the Windows side at all.
